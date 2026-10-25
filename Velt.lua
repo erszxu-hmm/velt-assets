@@ -1,6 +1,4 @@
--- LumenVelt: Lumen UI exposed through the Velt API (single file: Lumen bundle + adapter)
-local Lumen = (function()
--- Lumen UI 1.0.0 (single-file bundle). Usage: local Lumen = loadstring(readfile("Lumen.bundle.lua"))()
+-- Velt UI 2.0.0 (single-file bundle). Usage: local Velt = loadstring(readfile("Velt.bundle.lua"))()
 local __methods = {}
 function __methods.WaitForChild(self, name)
 	local c = rawget(self, "_kids")[name]
@@ -34,18 +32,22 @@ local __comp = __node("Components", __root)
 
 __node("Animation", __core)
 __node("Config", __core)
+__node("Configs", __core)
 __node("Container", __core)
 __node("Drag", __core)
 __node("Focus", __core)
+__node("Groupbox", __core)
 __node("Maid", __core)
 __node("Notifications", __core)
 __node("Pool", __core)
+__node("Shell", __core)
 __node("Signal", __core)
 __node("Theme", __core)
 __node("Tooltip", __core)
 __node("Util", __core)
 __node("Window", __core)
 __node("Basic", __comp)
+__node("Bind", __comp)
 __node("Button", __comp)
 __node("Checkbox", __comp)
 __node("ColorPicker", __comp)
@@ -62,7 +64,7 @@ __node("Widgets", __comp)
 -- ===== Core/Animation =====
 rawget(__core, "_kids")["Animation"]._fn = function(script, require)
 --[[
-	Lumen UI :: Core/Animation
+	Velt UI :: Core/Animation
 	- Animation.Tween: TweenService wrapper (cached TweenInfo, per-property cancel, reduced-motion aware)
 	- Animation.Number: custom numeric animation on ONE shared Heartbeat connection
 	- Animation.Easing: pure easing functions (t in 0..1)
@@ -238,11 +240,11 @@ end
 -- ===== Core/Config =====
 rawget(__core, "_kids")["Config"]._fn = function(script, require)
 --[[
-	Lumen UI :: Core/Config
+	Velt UI :: Core/Config
 	Default configuration. Override at runtime with Lumen:Configure({ ... }) (deep-merged).
 ]]
 return {
-	Theme = "Dark",
+	Theme = "Velt",
 	DisplayOrder = 100,
 
 	Font = Enum.Font.GothamMedium,
@@ -269,7 +271,7 @@ return {
 	},
 
 	Window = {
-		Size = UDim2.fromOffset(580, 400),
+		Size = UDim2.fromOffset(720, 470),
 		MinSize = Vector2.new(380, 260),
 		MaxSize = Vector2.new(1200, 900),
 		TitleBarHeight = 42,
@@ -308,10 +310,253 @@ return {
 end
 
 
+-- ===== Core/Configs =====
+rawget(__core, "_kids")["Configs"]._fn = function(script, require)
+--[[
+	Velt UI :: Core/Configs
+	Saves / loads every element that has a `Flag`, plus custom themes, with autoload support.
+	Uses the executor file API when present; otherwise falls back to in-memory storage for the session.
+]]
+local HttpService = game:GetService("HttpService")
+
+local Configs = {}
+Configs.__index = Configs
+
+local function fsAvailable()
+	return type(writefile) == "function" and type(readfile) == "function" and type(isfile) == "function"
+		and type(isfolder) == "function" and type(makefolder) == "function" and type(listfiles) == "function"
+end
+
+local function clean(name)
+	name = tostring(name or ""):gsub("[^%w _%-]", "")
+	name = name:gsub("^%s+", ""):gsub("%s+$", "")
+	return name:sub(1, 32)
+end
+
+local function encode(v)
+	local t = typeof(v)
+	if t == "Color3" then
+		return { __t = "C3", r = v.R, g = v.G, b = v.B }
+	elseif t == "table" then
+		local out = {}
+		for k, x in pairs(v) do out[k] = encode(x) end
+		return out
+	end
+	return v
+end
+
+local function decode(v)
+	if type(v) == "table" then
+		if v.__t == "C3" then return Color3.new(v.r, v.g, v.b) end
+		local out = {}
+		for k, x in pairs(v) do out[k] = decode(x) end
+		return out
+	end
+	return v
+end
+
+--- @param ctx table @param window table (needs .Flags) @param root string folder name, default "Velt"
+-- @return Configs
+function Configs.new(ctx, window, root)
+	local self = setmetatable({ Ctx = ctx, Window = window }, Configs)
+	self.Root = clean(root) ~= "" and clean(root) or "Velt"
+	self.CfgDir = self.Root .. "/configs"
+	self.ThemeDir = self.Root .. "/themes"
+	self.FS = fsAvailable()
+	self.Memory = { configs = {}, themes = {}, autoload = {} }
+	if self.FS then
+		pcall(function()
+			for _, dir in ipairs({ self.Root, self.CfgDir, self.ThemeDir }) do
+				if not isfolder(dir) then makefolder(dir) end
+			end
+		end)
+	end
+	return self
+end
+
+function Configs:_dir(kind)
+	return kind == "themes" and self.ThemeDir or self.CfgDir
+end
+
+function Configs:_write(kind, name, text)
+	if self.FS then
+		return (pcall(writefile, self:_dir(kind) .. "/" .. name .. ".json", text))
+	end
+	self.Memory[kind][name] = text
+	return true
+end
+
+function Configs:_read(kind, name)
+	if self.FS then
+		local path = self:_dir(kind) .. "/" .. name .. ".json"
+		local ok, has = pcall(isfile, path)
+		if not (ok and has) then return nil end
+		local ok2, text = pcall(readfile, path)
+		return ok2 and text or nil
+	end
+	return self.Memory[kind][name]
+end
+
+--- Lists saved names. @param kind string "configs"|"themes" @return table sorted names
+function Configs:List(kind)
+	local names = {}
+	if self.FS then
+		local ok, files = pcall(listfiles, self:_dir(kind))
+		if ok and type(files) == "table" then
+			for _, f in ipairs(files) do
+				local n = tostring(f):match("([^/\\]+)%.json$")
+				if n then table.insert(names, n) end
+			end
+		end
+	else
+		for n in pairs(self.Memory[kind]) do table.insert(names, n) end
+	end
+	table.sort(names, function(a, b) return a:lower() < b:lower() end)
+	return names
+end
+
+--- Saves all flagged elements. @param name string @return boolean ok, string|nil err
+function Configs:Save(name)
+	name = clean(name)
+	if name == "" then return false, "Name is empty" end
+	local data = {}
+	for flag, el in pairs(self.Window.Flags) do
+		if el.Get and not (el.Props and el.Props.IgnoreConfig) then
+			local ok, v = pcall(el.Get, el)
+			if ok and v ~= nil then data[flag] = encode(v) end
+		end
+	end
+	local ok, text = pcall(HttpService.JSONEncode, HttpService, { version = 1, flags = data })
+	if not ok then return false, "Could not encode data" end
+	if not self:_write("configs", name, text) then return false, "Could not write file" end
+	return true
+end
+
+--- Loads a config; every saved flag is applied through the element's Set (callbacks fire).
+-- @param name string @return boolean ok, string|nil err
+function Configs:Load(name)
+	name = clean(name)
+	local text = self:_read("configs", name)
+	if not text then return false, "Config not found" end
+	local ok, decoded = pcall(HttpService.JSONDecode, HttpService, text)
+	if not ok or type(decoded) ~= "table" or type(decoded.flags) ~= "table" then return false, "Invalid config file" end
+	for flag, value in pairs(decoded.flags) do
+		local el = self.Window.Flags[flag]
+		if el and el.Set then
+			local good, err = pcall(el.Set, el, decode(value))
+			if not good then warn("[Velt] config load '" .. flag .. "': " .. tostring(err)) end
+		end
+	end
+	return true
+end
+
+--- @param name string
+function Configs:Delete(name)
+	name = clean(name)
+	if self.FS then
+		pcall(function()
+			local path = self.CfgDir .. "/" .. name .. ".json"
+			if isfile(path) and delfile then delfile(path) end
+		end)
+	else
+		self.Memory.configs[name] = nil
+	end
+end
+
+--- Autoload helpers (kind = "configs" | "themes").
+function Configs:SetAutoload(kind, name)
+	name = clean(name)
+	if self.FS then
+		pcall(writefile, self:_dir(kind) .. "/autoload.txt", name)
+	else
+		self.Memory.autoload[kind] = name
+	end
+end
+
+function Configs:ClearAutoload(kind)
+	if self.FS then
+		pcall(function()
+			local path = self:_dir(kind) .. "/autoload.txt"
+			if isfile(path) and delfile then delfile(path) end
+		end)
+	else
+		self.Memory.autoload[kind] = nil
+	end
+end
+
+--- @return string|nil
+function Configs:GetAutoload(kind)
+	if self.FS then
+		local path = self:_dir(kind) .. "/autoload.txt"
+		local ok, has = pcall(isfile, path)
+		if ok and has then
+			local ok2, text = pcall(readfile, path)
+			if ok2 and text ~= "" then return text end
+		end
+		return nil
+	end
+	return self.Memory.autoload[kind]
+end
+
+--- Saves the ACTIVE palette as a custom theme. @param name string @return boolean ok, string|nil err
+function Configs:SaveTheme(name)
+	name = clean(name)
+	if name == "" then return false, "Name is empty" end
+	local ok, text = pcall(HttpService.JSONEncode, HttpService, encode(self.Ctx.Theme.Palette))
+	if not ok then return false, "Could not encode theme" end
+	if not self:_write("themes", name, text) then return false, "Could not write file" end
+	return true
+end
+
+--- Registers a saved custom theme (does not apply it). @param name string @return boolean ok
+function Configs:LoadTheme(name)
+	name = clean(name)
+	local text = self:_read("themes", name)
+	if not text then return false end
+	local ok, decoded = pcall(HttpService.JSONDecode, HttpService, text)
+	if not ok or type(decoded) ~= "table" then return false end
+	self.Ctx.Theme:Register(name, decode(decoded))
+	return true
+end
+
+function Configs:DeleteTheme(name)
+	name = clean(name)
+	if self.FS then
+		pcall(function()
+			local path = self.ThemeDir .. "/" .. name .. ".json"
+			if isfile(path) and delfile then delfile(path) end
+		end)
+	else
+		self.Memory.themes[name] = nil
+	end
+end
+
+--- Applies the autoload config / theme if any. @return boolean|nil
+function Configs:LoadAutoload()
+	local name = self:GetAutoload("configs")
+	if name then return self:Load(name) end
+end
+
+function Configs:LoadAutoloadTheme()
+	local name = self:GetAutoload("themes")
+	if name then
+		if self.Ctx.Theme.Palettes[name] or self:LoadTheme(name) then
+			self.Ctx.Theme:Set(name, false)
+			return true
+		end
+	end
+end
+
+Configs.Clean = clean
+return Configs
+
+end
+
+
 -- ===== Core/Container =====
 rawget(__core, "_kids")["Container"]._fn = function(script, require)
 --[[
-	Lumen UI :: Core/Container
+	Velt UI :: Core/Container
 	Base class for anything that hosts elements (Tab, TabGroup page).
 	Every Add* method is protected: a bad prop table logs a clear warning and returns an inert
 	null-object instead of crashing the calling script.
@@ -353,7 +598,7 @@ function Container:_add(name, props)
 		return debug.traceback(tostring(e), 2)
 	end, self, props)
 	if not ok then
-		warn(string.format("[Lumen] could not create %s: %s", name, tostring(result)))
+		warn(string.format("[Velt] could not create %s: %s", name, tostring(result)))
 		return Null
 	end
 	if self.Window and self.Window.Elements then
@@ -391,6 +636,12 @@ function Container:AddLabel(props) return self:_add("Label", asProps(props, "Tex
 function Container:AddSection(props) return self:_add("Section", asProps(props, "Text")) end
 --- Adds a thin divider line. @return Divider
 function Container:AddDivider() return self:_add("Divider", {}) end
+--- Adds a keybind row. @param props table { Text, CurrentValue="Q", Mode="Toggle"|"Hold", Callback(active), OnChanged(key) } @return Bind
+function Container:AddBind(props) return self:_add("Bind", asProps(props, "Text")) end
+--- Adds a label row (can host :AddBind / :AddColorPicker). @param props string|table { Text } @return LabelRow
+function Container:AddLabelRow(props) return self:_add("LabelRow", asProps(props, "Text")) end
+--- Adds a paragraph. @param props table { Title, Content } @return Paragraph
+function Container:AddParagraph(props) return self:_add("Paragraph", asProps(props, "Content")) end
 --- Adds a nested tab group. @param props table { Tabs = {"A","B"}, Default = 1 } @return TabGroup (.Tabs[name|index] are containers)
 function Container:AddTabGroup(props) return self:_add("TabGroup", props) end
 
@@ -402,7 +653,7 @@ end
 -- ===== Core/Drag =====
 rawget(__core, "_kids")["Drag"]._fn = function(script, require)
 --[[
-	Lumen UI :: Core/Drag
+	Velt UI :: Core/Drag
 	Press-and-drag helper. The InputChanged/InputEnded connections exist ONLY while a drag is active.
 ]]
 local UserInputService = game:GetService("UserInputService")
@@ -471,7 +722,7 @@ end
 -- ===== Core/Focus =====
 rawget(__core, "_kids")["Focus"]._fn = function(script, require)
 --[[
-	Lumen UI :: Core/Focus
+	Velt UI :: Core/Focus
 	Keyboard navigation per window.
 	Press the engage key (default Tab) while the window is visible:
 	  Up/Down or Tab/Shift+Tab = move, Left/Right = adjust, Enter/Space = activate, Esc = leave.
@@ -485,7 +736,7 @@ local Util = require(script.Parent.Util)
 local Focus = {}
 Focus.__index = Focus
 
-local ACTION = "LumenNavigate"
+local ACTION = "VeltNavigate"
 
 --- @param ctx table library context
 -- @param window table owning window (needs .Visible)
@@ -660,10 +911,231 @@ return Focus
 end
 
 
+-- ===== Core/Groupbox =====
+rawget(__core, "_kids")["Groupbox"]._fn = function(script, require)
+--[[
+	Velt UI :: Core/Groupbox
+	A titled card that hosts elements. It is a Container, so every Add* method works, and it adds
+	Velt-style Create* helpers (Name / CurrentValue / Range / Increment ...) that map onto the components.
+	Click the header to collapse / expand.
+]]
+local Container = require(script.Parent.Container)
+local Widgets = require(script.Parent.Parent.Components.Widgets)
+
+local Groupbox = Container.extend()
+
+--- @param ctx table @param window table @param columnFrame GuiObject parent column
+-- @param settings table { Name, Icon, Column (handled by Tab), Collapsed=false }
+-- @return Groupbox
+function Groupbox.new(ctx, window, columnFrame, settings)
+	settings = settings or {}
+	local Util, Config, T = ctx.Util, ctx.Config, ctx.Theme
+	local self = setmetatable({ Ctx = ctx, Window = window, _order = 0, Settings = settings, Children = {} }, Groupbox)
+	self.Collapsed = settings.Collapsed == true
+
+	local card = Util.Create("Frame", {
+		Name = "Groupbox_" .. tostring(settings.Name or "Box"), BorderSizePixel = 0, Size = UDim2.new(1, 0, 0, 0),
+		AutomaticSize = Enum.AutomaticSize.Y, LayoutOrder = settings.Order or 0, Parent = columnFrame,
+	}, { Util.Corner(Config.Radius + 2), Util.List(0) })
+	local stroke = Util.Stroke(1)
+	stroke.Parent = card
+	T:Bind(card, { BackgroundColor3 = "Surface" })
+	T:Bind(stroke, { Color = "Stroke", Transparency = function() return 0.25 end })
+	self.Card = card
+
+	local header = Util.Create("TextButton", {
+		Name = "Header", Text = "", AutoButtonColor = false, BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 38),
+		LayoutOrder = 1, Parent = card,
+	})
+	local hasIcon = settings.Icon ~= nil
+	if hasIcon then
+		self.IconObj = Util.Create("ImageLabel", { Name = "Icon", BackgroundTransparency = 1, AnchorPoint = Vector2.new(0, 0.5),
+			Position = UDim2.new(0, 14, 0.5, 0), Size = UDim2.fromOffset(16, 16), Image = ctx:ResolveIcon(settings.Icon), Parent = header })
+		T:Bind(self.IconObj, { ImageColor3 = "Accent" })
+	end
+	self.TitleObj = Util.Label({ Name = "Title", Text = tostring(settings.Name or ""), Font = Config.FontBold,
+		Position = UDim2.fromOffset(hasIcon and 38 or 14, 0), Size = UDim2.new(1, -(hasIcon and 74 or 50), 1, 0),
+		TextTruncate = Enum.TextTruncate.AtEnd, Parent = header })
+	T:Bind(self.TitleObj, { TextColor3 = "Text" })
+	local chevron = Widgets.Chevron(ctx, header)
+	chevron.Frame.Position = UDim2.new(1, -20, 0.5, 0)
+
+	local line = Util.Create("Frame", { Name = "Line", BorderSizePixel = 0, Size = UDim2.new(1, 0, 0, 1), LayoutOrder = 2, Parent = card })
+	T:Bind(line, { BackgroundColor3 = "Stroke", BackgroundTransparency = function() return 0.4 end })
+
+	local content = Util.Create("Frame", {
+		Name = "Content", BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
+		LayoutOrder = 3, Parent = card,
+	}, { Util.List(Config.ElementGap), Util.Padding(10, 10, 10, 12) })
+	self.Frame, self.Content, self.Line = content, content, line
+
+	local function applyCollapse(animate)
+		content.Visible = not self.Collapsed
+		line.Visible = not self.Collapsed
+		chevron.SetOpen(self.Collapsed, animate)
+	end
+	applyCollapse(false)
+	self._headerConn = header.Activated:Connect(function()
+		self.Collapsed = not self.Collapsed
+		applyCollapse(true)
+	end)
+	ctx.Theme:Track(self, function() chevron.SetColor(T:Get("TextMuted")) end)
+	chevron.SetColor(T:Get("TextMuted"))
+
+	if window._registerGlass then window:_registerGlass(card, 0.2) end
+	return self
+end
+
+function Groupbox:_add(name, props)
+	local el = Container._add(self, name, props)
+	table.insert(self.Children, el)
+	return el
+end
+
+--- Renames / re-icons the box. @param s table { Name, Icon }
+function Groupbox:Set(s)
+	if s.Name then self.TitleObj.Text = tostring(s.Name) end
+	if s.Icon and self.IconObj then self.IconObj.Image = self.Ctx:ResolveIcon(s.Icon) end
+end
+
+--- Collapses / expands. @param collapsed boolean
+function Groupbox:SetCollapsed(collapsed)
+	if self.Collapsed ~= (collapsed and true or false) then
+		self.Collapsed = collapsed and true or false
+		self.Content.Visible = not self.Collapsed
+		self.Line.Visible = not self.Collapsed
+	end
+end
+
+--- Destroys the box and its elements.
+function Groupbox:Destroy()
+	self.Ctx.Theme:Untrack(self)
+	if self._headerConn then self._headerConn:Disconnect() end
+	for _, el in ipairs(self.Children) do
+		if type(el) == "table" and el.Destroy then pcall(el.Destroy, el) end
+	end
+	table.clear(self.Children)
+	self.Card:Destroy()
+end
+
+-- Velt-style creators -----------------------------------------------------------------------------------
+local BUTTON_STYLES = { [1] = "Solid", [2] = "Flat", Solid = "Solid", Flat = "Flat", Outline = "Outline", Ghost = "Ghost", Gradient = "Gradient" }
+
+--- @param s table { Name, Icon, Style=1(accent)|2(flat), Callback, Tooltip, Color }
+function Groupbox:CreateButton(s)
+	s = s or {}
+	return self:_add("Button", { Text = s.Name, Icon = s.Icon, Style = BUTTON_STYLES[s.Style] or "Flat", Callback = s.Callback,
+		Tooltip = s.Tooltip, Color = s.Color })
+end
+
+--- @param s table { Name, CurrentValue=false, Callback(bool), Tooltip, Flag } -> Toggle (supports :AddBind / :AddColorPicker / :Lock)
+function Groupbox:CreateToggle(s)
+	s = s or {}
+	return self:_add("Toggle", { Text = s.Name, Default = s.CurrentValue == true, Callback = s.Callback, Tooltip = s.Tooltip,
+		Flag = s.Flag, IgnoreConfig = s.IgnoreConfig })
+end
+
+--- @param s table { Name, CurrentValue, Callback, Tooltip, Flag, Color }
+function Groupbox:CreateCheckbox(s)
+	s = s or {}
+	return self:_add("Checkbox", { Text = s.Name, Default = s.CurrentValue == true, Callback = s.Callback, Tooltip = s.Tooltip,
+		Flag = s.Flag, Color = s.Color, IgnoreConfig = s.IgnoreConfig })
+end
+
+--- @param s table { Name, Range={min,max}, CurrentValue, Increment, Suffix, Callback(number), Tooltip, Flag }
+function Groupbox:CreateSlider(s)
+	s = s or {}
+	local r = s.Range or { 0, 100 }
+	return self:_add("Slider", { Text = s.Name, Min = r[1], Max = r[2], Default = s.CurrentValue, Step = s.Increment, Suffix = s.Suffix,
+		Orientation = s.Orientation, Height = s.Height, Callback = s.Callback, Tooltip = s.Tooltip, Flag = s.Flag, IgnoreConfig = s.IgnoreConfig })
+end
+
+--- @param s table { Name, PlaceholderText, CurrentValue, Numeric, MaxCharacters, Password, Pattern, Enter=true, Callback(text), Flag }
+function Groupbox:CreateInput(s)
+	s = s or {}
+	return self:_add("Textbox", { Text = s.Name, Placeholder = s.PlaceholderText, Default = s.CurrentValue, Numeric = s.Numeric,
+		MaxLength = s.MaxCharacters, Password = s.Password, Pattern = s.Pattern, Validate = s.Validate, Required = s.Required,
+		LiveUpdate = s.Enter == false, Callback = s.Callback, Tooltip = s.Tooltip, Flag = s.Flag, IgnoreConfig = s.IgnoreConfig })
+end
+
+--- @param s table { Name, Options, CurrentOption (string | table), MultipleOptions, Searchable, Special=1(players)|2(teams), Callback, Flag }
+function Groupbox:CreateDropdown(s)
+	s = s or {}
+	local options = s.Options or {}
+	if s.Special == 1 or s.Special == 2 then
+		local svc = game:GetService(s.Special == 1 and "Players" or "Teams")
+		local function names()
+			local list = {}
+			for _, o in ipairs(svc:GetChildren()) do table.insert(list, o.Name) end
+			return list
+		end
+		options = names()
+		local el = self:CreateDropdown({ Name = s.Name, Options = options, CurrentOption = s.CurrentOption, MultipleOptions = s.MultipleOptions,
+			Searchable = true, Callback = s.Callback, Tooltip = s.Tooltip, Flag = s.Flag })
+		local function refresh() if el.SetOptions then el:SetOptions(names()) end end
+		self.Window.Maid:Give(svc.ChildAdded:Connect(refresh))
+		self.Window.Maid:Give(svc.ChildRemoved:Connect(refresh))
+		return el
+	end
+	local default = s.CurrentOption
+	if type(default) == "table" and not s.MultipleOptions then default = default[1] end
+	return self:_add("Dropdown", { Text = s.Name, Options = options, Default = default, Multi = s.MultipleOptions,
+		Searchable = s.Searchable == nil and #options > 8 or s.Searchable, MaxVisible = s.MaxVisible, Placeholder = s.Placeholder,
+		Callback = s.Callback, Tooltip = s.Tooltip, Flag = s.Flag, IgnoreConfig = s.IgnoreConfig })
+end
+
+--- @param s table { Name, Options, CurrentOption, Callback, Flag }
+function Groupbox:CreateRadioGroup(s)
+	s = s or {}
+	return self:_add("RadioGroup", { Text = s.Name, Options = s.Options, Default = s.CurrentOption, Callback = s.Callback, Flag = s.Flag })
+end
+
+--- @param s table { Name, CurrentValue=Color3, Gradient, Callback(color3), Flag }
+function Groupbox:CreateColorPicker(s)
+	s = s or {}
+	return self:_add("ColorPicker", { Text = s.Name, Default = s.CurrentValue, Gradient = s.Gradient, Callback = s.Callback,
+		Tooltip = s.Tooltip, Flag = s.Flag, IgnoreConfig = s.IgnoreConfig })
+end
+
+--- @param s table { Name, CurrentValue="Q", HoldToInteract, Callback(active), OnChangedCallback(key), Flag }
+function Groupbox:CreateBind(s)
+	s = s or {}
+	return self:_add("Bind", { Text = s.Name, CurrentValue = s.CurrentValue, Mode = s.HoldToInteract and "Hold" or "Toggle",
+		Callback = s.Callback, OnChanged = s.OnChangedCallback or s.OnChanged, Tooltip = s.Tooltip, Flag = s.Flag, IgnoreConfig = s.IgnoreConfig })
+end
+
+--- @param s table { Name } -> LabelRow (supports :AddBind / :AddColorPicker)
+function Groupbox:CreateLabel(s)
+	s = s or {}
+	return self:_add("LabelRow", { Text = s.Name or s.Text })
+end
+
+--- @param s table { Name, Content }
+function Groupbox:CreateParagraph(s)
+	s = s or {}
+	return self:_add("Paragraph", { Title = s.Name or s.Title, Content = s.Content })
+end
+
+--- @param s table { Name, Value, Min, Max, Style="Linear"|"Circular" }
+function Groupbox:CreateProgressBar(s)
+	s = s or {}
+	return self:_add("ProgressBar", { Text = s.Name, Value = s.Value or s.CurrentValue, Min = s.Min, Max = s.Max, Style = s.Style,
+		ShowPercent = s.ShowPercent, Animated = s.Animated, Color = s.Color })
+end
+
+function Groupbox:CreateDivider()
+	return self:_add("Divider", {})
+end
+
+return Groupbox
+
+end
+
+
 -- ===== Core/Maid =====
 rawget(__core, "_kids")["Maid"]._fn = function(script, require)
 --[[
-	Lumen UI :: Core/Maid
+	Velt UI :: Core/Maid
 	Collects connections / instances / functions / destroyables and cleans them together.
 ]]
 local Maid = {}
@@ -712,7 +1184,7 @@ end
 -- ===== Core/Notifications =====
 rawget(__core, "_kids")["Notifications"]._fn = function(script, require)
 --[[
-	Lumen UI :: Core/Notifications
+	Velt UI :: Core/Notifications
 	Toasts (Info/Success/Warning/Error, auto-dismiss, click to dismiss) and modal Alerts.
 	Toast cards are pooled: repeated notifications never allocate new Instances after warm-up.
 ]]
@@ -727,7 +1199,8 @@ local TOKEN = { Info = "Accent", Success = "Success", Warning = "Warning", Error
 -- @return Notifications
 function Notifications.new(ctx, gui)
 	local cfg = ctx.Config.Notification
-	local self = setmetatable({ Ctx = ctx, Gui = gui, Active = {}, _n = 0 }, Notifications)
+	local self = setmetatable({ Ctx = ctx, Gui = gui, Active = {}, _n = 0, History = {} }, Notifications)
+	self.Added = ctx.Signal.new()
 
 	local pos = cfg.Position
 	local right, left = pos:find("Right") ~= nil, pos:find("Left") ~= nil
@@ -801,6 +1274,13 @@ function Notifications:Notify(props)
 	local kind = TOKEN[props.Type] and props.Type or "Info"
 	local duration = tonumber(props.Duration) or cfg.Duration
 
+	do
+		local entry = { Title = tostring(props.Title or kind), Content = tostring(props.Content or ""), Type = kind, Time = os.time() }
+		table.insert(self.History, 1, entry)
+		if #self.History > 40 then table.remove(self.History) end
+		self.Added:Fire(entry)
+	end
+
 	while #self.Active >= cfg.Max do
 		self.Active[1].Dismiss()
 	end
@@ -865,7 +1345,7 @@ function Notifications:Alert(props)
 	local kind = TOKEN[props.Type] and props.Type or "Info"
 
 	local dim = Util.Create("TextButton", {
-		Name = "LumenAlert", Text = "", AutoButtonColor = false, BorderSizePixel = 0, ZIndex = 300,
+		Name = "VeltAlert", Text = "", AutoButtonColor = false, BorderSizePixel = 0, ZIndex = 300,
 		BackgroundColor3 = Color3.new(), BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1), Parent = self.Gui,
 	})
 	local card = Util.Create("Frame", {
@@ -935,7 +1415,7 @@ end
 -- ===== Core/Pool =====
 rawget(__core, "_kids")["Pool"]._fn = function(script, require)
 --[[
-	Lumen UI :: Core/Pool
+	Velt UI :: Core/Pool
 	Generic object pool. Used for notification cards and dropdown rows so repeated
 	open/close never allocates new Instances.
 ]]
@@ -995,10 +1475,1012 @@ return Pool
 end
 
 
+-- ===== Core/Shell =====
+rawget(__core, "_kids")["Shell"]._fn = function(script, require)
+--[[
+	Velt UI :: Core/Shell
+	The Velt window: brand + sectioned sidebar navigation + player card, top bar (title, notification center,
+	minimize / maximize / close), multi-column tab pages with groupboxes, popup layer, loading screen,
+	dashboard (home) tab, config + theme builders, glass mode and a draggable floating toggle for touch devices.
+
+	Hierarchy:  Window -> TabSection -> Tab (1-3 columns) -> Groupbox -> elements
+]]
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local Players = game:GetService("Players")
+local Lighting = game:GetService("Lighting")
+local Stats = game:GetService("Stats")
+
+local Util = require(script.Parent.Util)
+local Drag = require(script.Parent.Drag)
+local Groupbox = require(script.Parent.Groupbox)
+local Configs = require(script.Parent.Configs)
+
+local Shell = {}
+Shell.__index = Shell
+
+local Section = {}
+Section.__index = Section
+local Tab = {}
+Tab.__index = Tab
+
+local SIDEBAR_W, COMPACT_W, TOPBAR_H, COMPACT_BELOW = 204, 66, 58, 620
+
+local function ago(t)
+	local d = os.time() - t
+	if d < 5 then return "now" end
+	if d < 60 then return d .. "s ago" end
+	if d < 3600 then return math.floor(d / 60) .. "m ago" end
+	return math.floor(d / 3600) .. "h ago"
+end
+
+--- Creates a window. Prefer Velt:CreateWindow().
+-- @param ctx table @param props table { Name, Subtitle, Icon, Size, Theme, ToggleKey=KeyCode|false, Glass, Blur, LoadingEnabled,
+--   LoadingSettings={Title,Subtitle,Duration}, ConfigFolder, FloatingButton, PlayerCard=true, AutoloadTheme=true }
+-- @return Window
+function Shell.new(ctx, props)
+	props = props or {}
+	local Config, T = ctx.Config, ctx.Theme
+	local self = setmetatable({}, Shell)
+	self.Ctx, self.Props = ctx, props
+	self.Maid = ctx.Maid.new()
+	self.Elements, self.Flags = {}, {}
+	self.Tabs, self.Sections = {}, {}
+	self.Is3D, self.Visible, self.Minimized, self.Maximized = false, true, false, false
+	self.Opened, self.Closed, self.TabChanged = ctx.Signal.new(), ctx.Signal.new(), ctx.Signal.new()
+	self._glass, self._compactHide, self._unread, self._vtoken = {}, {}, 0, 0
+	local tk = props.ToggleKey
+	if tk == nil then tk = Enum.KeyCode.RightShift end
+	self.ToggleKey = tk
+	if props.Theme then T:Set(props.Theme) end
+
+	local gui = ctx:GetScreenGui()
+	self.Gui = gui
+	local base = props.Size or Config.Window.Size
+	if typeof(base) == "Vector2" then base = UDim2.fromOffset(base.X, base.Y) end
+	self.Size = self:_fit(Vector2.new(base.X.Offset, base.Y.Offset))
+	local vp = Util.Viewport()
+
+	local holder = Util.Create("Frame", {
+		Name = "Velt_" .. tostring(props.Name or "Window"), BackgroundTransparency = 1,
+		Size = UDim2.fromOffset(self.Size.X, self.Size.Y),
+		Position = UDim2.fromOffset(math.floor((vp.X - self.Size.X) / 2), math.floor((vp.Y - self.Size.Y) / 2)), Parent = gui,
+	})
+	self.Holder = holder
+	self.Maid:Give(holder)
+
+	local sh = Config.Shadow
+	local shadow = Util.Create("ImageLabel", {
+		Name = "Shadow", BackgroundTransparency = 1, ZIndex = 0, Image = sh.Image, ScaleType = Enum.ScaleType.Slice,
+		SliceCenter = sh.Slice, ImageTransparency = sh.Transparency,
+		Position = UDim2.fromOffset(-sh.Spread, -sh.Spread + 8), Size = UDim2.new(1, sh.Spread * 2, 1, sh.Spread * 2), Parent = holder,
+	})
+	T:Bind(shadow, { ImageColor3 = "Shadow" })
+
+	local main = Util.Create("Frame", {
+		Name = "Main", Size = UDim2.fromScale(1, 1), BorderSizePixel = 0, ClipsDescendants = true, ZIndex = 1, Parent = holder,
+	}, { Util.Corner(Config.Radius + 4) })
+	local mainStroke = Util.Stroke(1)
+	mainStroke.Parent = main
+	T:Bind(main, { BackgroundColor3 = "Background" })
+	T:Bind(mainStroke, { Color = "Stroke" })
+	self.Main = main
+
+	-- sidebar ------------------------------------------------------------------------------------------------
+	local sidebar = Util.Create("Frame", { Name = "Sidebar", BorderSizePixel = 0, Size = UDim2.new(0, SIDEBAR_W, 1, 0), Parent = main })
+	T:Bind(sidebar, { BackgroundColor3 = "Surface" })
+	local sbLine = Util.Create("Frame", { Name = "Line", BorderSizePixel = 0, AnchorPoint = Vector2.new(1, 0), Position = UDim2.fromScale(1, 0),
+		Size = UDim2.new(0, 1, 1, 0), Parent = sidebar })
+	T:Bind(sbLine, { BackgroundColor3 = "Stroke" })
+	self.Sidebar = sidebar
+
+	local brand = Util.Create("Frame", { Name = "Brand", BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 66), Parent = sidebar })
+	self.Brand = brand
+	local logo
+	if props.Icon then
+		logo = Util.Create("ImageLabel", { Name = "Logo", BackgroundTransparency = 1, AnchorPoint = Vector2.new(0, 0.5),
+			Position = UDim2.new(0, 18, 0.5, 0), Size = UDim2.fromOffset(30, 30), Image = ctx:ResolveIcon(props.Icon),
+			ScaleType = Enum.ScaleType.Fit, Parent = brand })
+		T:Bind(logo, { ImageColor3 = "Accent" })
+	else
+		logo = Util.Create("Frame", { Name = "Logo", BorderSizePixel = 0, AnchorPoint = Vector2.new(0, 0.5),
+			Position = UDim2.new(0, 18, 0.5, 0), Size = UDim2.fromOffset(30, 30), Parent = brand }, { Util.Corner(10) })
+		T:Bind(logo, { BackgroundColor3 = "Accent" })
+		local letter = Util.Label({ Name = "Letter", Text = string.upper(tostring(props.Name or "V"):sub(1, 1)), Font = Config.FontBold,
+			TextSize = 17, TextXAlignment = Enum.TextXAlignment.Center, Size = UDim2.fromScale(1, 1), Parent = logo })
+		T:Bind(letter, { TextColor3 = "AccentText" })
+	end
+	self.Logo = logo
+	local brandTitle = Util.Label({ Name = "Name", Text = tostring(props.Name or "Velt"), Font = Config.FontBold, TextSize = 17,
+		Position = UDim2.fromOffset(58, 0), Size = UDim2.new(1, -66, 1, 0), TextTruncate = Enum.TextTruncate.AtEnd, Parent = brand })
+	T:Bind(brandTitle, { TextColor3 = "Text" })
+	table.insert(self._compactHide, brandTitle)
+
+	local playerH = props.PlayerCard == false and 0 or 68
+	local nav = Util.Create("ScrollingFrame", {
+		Name = "Nav", BackgroundTransparency = 1, BorderSizePixel = 0, ScrollBarThickness = 0, CanvasSize = UDim2.new(),
+		AutomaticCanvasSize = Enum.AutomaticSize.Y, Position = UDim2.fromOffset(0, 66), Size = UDim2.new(1, 0, 1, -(66 + playerH)), Parent = sidebar,
+	}, { Util.List(10), Util.Padding(10, 4, 10, 10) })
+	self.Nav = nav
+
+	if playerH > 0 then
+		local plr = Players.LocalPlayer
+		local card = Util.Create("Frame", { Name = "PlayerCard", BorderSizePixel = 0, Position = UDim2.new(0, 10, 1, -60),
+			Size = UDim2.new(1, -20, 0, 50), Parent = sidebar }, { Util.Corner(12) })
+		local cs = Util.Stroke(1)
+		cs.Parent = card
+		T:Bind(card, { BackgroundColor3 = "SurfaceAlt" })
+		T:Bind(cs, { Color = "Stroke", Transparency = function() return 0.3 end })
+		local avatar = Util.Create("ImageLabel", { Name = "Avatar", BorderSizePixel = 0, Position = UDim2.fromOffset(8, 8), Size = UDim2.fromOffset(34, 34),
+			Image = plr and string.format("rbxthumb://type=AvatarHeadShot&id=%d&w=150&h=150", plr.UserId) or "", Parent = card }, { Util.Corner("full") })
+		T:Bind(avatar, { BackgroundColor3 = "Track" })
+		local n1 = Util.Label({ Name = "Display", Text = plr and plr.DisplayName or "Player", Font = Config.FontBold, TextSize = 13,
+			Position = UDim2.fromOffset(50, 8), Size = UDim2.new(1, -58, 0, 18), TextTruncate = Enum.TextTruncate.AtEnd, Parent = card })
+		local n2 = Util.Label({ Name = "User", Text = "@" .. (plr and plr.Name or "player"), TextSize = 11,
+			Position = UDim2.fromOffset(50, 26), Size = UDim2.new(1, -58, 0, 14), TextTruncate = Enum.TextTruncate.AtEnd, Parent = card })
+		T:Bind(n1, { TextColor3 = "Text" })
+		T:Bind(n2, { TextColor3 = "TextMuted" })
+		table.insert(self._compactHide, n1)
+		table.insert(self._compactHide, n2)
+		self.Avatar = avatar
+	end
+
+	-- content / top bar ---------------------------------------------------------------------------------------
+	local content = Util.Create("Frame", { Name = "Content", BackgroundTransparency = 1, ClipsDescendants = true,
+		Position = UDim2.fromOffset(SIDEBAR_W, 0), Size = UDim2.new(1, -SIDEBAR_W, 1, 0), Parent = main })
+	self.Content = content
+
+	local topbar = Util.Create("Frame", { Name = "TopBar", BorderSizePixel = 0, ZIndex = 2, Size = UDim2.new(1, 0, 0, TOPBAR_H), Parent = content })
+	T:Bind(topbar, { BackgroundColor3 = "Background" })
+	local tbLine = Util.Create("Frame", { Name = "Line", BorderSizePixel = 0, Position = UDim2.new(0, 0, 1, -1), Size = UDim2.new(1, 0, 0, 1), Parent = topbar })
+	T:Bind(tbLine, { BackgroundColor3 = "Stroke", BackgroundTransparency = function() return 0.35 end })
+	self.Topbar = topbar
+	self.TitleLabel = Util.Label({ Name = "Title", Font = Config.FontBold, TextSize = 18, Position = UDim2.fromOffset(22, 9),
+		Size = UDim2.new(1, -220, 0, 22), TextTruncate = Enum.TextTruncate.AtEnd, Parent = topbar })
+	self.SubLabel = Util.Label({ Name = "Subtitle", TextSize = 12, Position = UDim2.fromOffset(22, 31), Size = UDim2.new(1, -220, 0, 16),
+		TextTruncate = Enum.TextTruncate.AtEnd, Text = tostring(props.Subtitle or ""), Parent = topbar })
+	T:Bind(self.TitleLabel, { TextColor3 = "Text" })
+	T:Bind(self.SubLabel, { TextColor3 = "TextMuted" })
+
+	local controls = Util.Create("Frame", { Name = "Controls", BackgroundTransparency = 1, AnchorPoint = Vector2.new(1, 0),
+		Position = UDim2.new(1, -12, 0, 0), Size = UDim2.new(0, 160, 1, 0), Parent = topbar }, { Util.List(4, Enum.FillDirection.Horizontal) })
+	local cl = controls:FindFirstChildOfClass("UIListLayout")
+	cl.HorizontalAlignment = Enum.HorizontalAlignment.Right
+	cl.VerticalAlignment = Enum.VerticalAlignment.Center
+
+	local function ctrlButton(name, order, danger)
+		local b = Util.Create("TextButton", { Name = name, Text = "", AutoButtonColor = false, BorderSizePixel = 0, BackgroundTransparency = 1,
+			Size = UDim2.fromOffset(32, 32), LayoutOrder = order, Parent = controls }, { Util.Corner(9) })
+		local function paint(on)
+			ctx.Anim.Tween(b, { BackgroundTransparency = on and 0 or 1, BackgroundColor3 = T:Get(danger and "Danger" or "Hover") }, Config.Animation.Fast)
+		end
+		self.Maid:Give(b.MouseEnter:Connect(function() paint(true) end))
+		self.Maid:Give(b.MouseLeave:Connect(function() paint(false) end))
+		return b
+	end
+	local function piece(parent, x, y, w, h, radius)
+		local f = Util.Create("Frame", { BorderSizePixel = 0, Position = UDim2.fromOffset(x, y), Size = UDim2.fromOffset(w, h), Parent = parent },
+			radius and { Util.Corner(radius) } or nil)
+		T:Bind(f, { BackgroundColor3 = "TextMuted" })
+		return f
+	end
+
+	local bell = ctrlButton("Notifications", 1, false)
+	piece(bell, 10, 7, 12, 13, "full")
+	piece(bell, 8, 18, 16, 3, 2)
+	piece(bell, 14, 22, 4, 3, "full")
+	local dot = Util.Create("Frame", { Name = "Unread", BorderSizePixel = 0, Visible = false, Position = UDim2.fromOffset(19, 5), Size = UDim2.fromOffset(9, 9),
+		Parent = bell }, { Util.Corner("full") })
+	T:Bind(dot, { BackgroundColor3 = "Danger" })
+	self._bellDot = dot
+
+	local minB = ctrlButton("Minimize", 2, false)
+	piece(minB, 10, 15, 12, 2, 1)
+	local maxB = ctrlButton("Maximize", 3, false)
+	local sq = Util.Create("Frame", { BackgroundTransparency = 1, Position = UDim2.fromOffset(10, 10), Size = UDim2.fromOffset(12, 12), Parent = maxB }, { Util.Corner(3) })
+	local sqs = Util.Stroke(1.6)
+	sqs.Parent = sq
+	T:Bind(sqs, { Color = "TextMuted" })
+	local closeB = ctrlButton("Close", 4, true)
+	local x = Util.Label({ Text = "\195\151", Font = Config.FontBold, TextSize = 22, TextXAlignment = Enum.TextXAlignment.Center, Size = UDim2.fromScale(1, 1), Parent = closeB })
+	T:Bind(x, { TextColor3 = "TextMuted" })
+
+	local pages = Util.Create("Frame", { Name = "Pages", BackgroundTransparency = 1, ClipsDescendants = true,
+		Position = UDim2.fromOffset(0, TOPBAR_H), Size = UDim2.new(1, 0, 1, -TOPBAR_H), Parent = content })
+	self.Pages = pages
+	self.Cover = Util.Create("Frame", { Name = "Cover", BorderSizePixel = 0, Visible = false, ZIndex = 30, Size = UDim2.fromScale(1, 1), Parent = pages })
+	T:Bind(self.Cover, { BackgroundColor3 = "Background" })
+
+	-- popup layer ---------------------------------------------------------------------------------------------
+	self.Overlay = Util.Create("Frame", { Name = "Overlay", BackgroundTransparency = 1, Visible = false, ZIndex = 50, Size = UDim2.fromScale(1, 1), Parent = main })
+	local blocker = Util.Create("TextButton", { Name = "Blocker", Text = "", AutoButtonColor = false, BackgroundTransparency = 1, ZIndex = 1,
+		Size = UDim2.fromScale(1, 1), Parent = self.Overlay })
+	self.Maid:Give(blocker.Activated:Connect(function() self:HidePopup() end))
+
+	-- resize grip -----------------------------------------------------------------------------------------------
+	local grip = Util.Create("TextButton", { Name = "ResizeGrip", Text = "", AutoButtonColor = false, BackgroundTransparency = 1, ZIndex = 25,
+		AnchorPoint = Vector2.new(1, 1), Position = UDim2.fromScale(1, 1), Size = UDim2.fromOffset(20, 20), Parent = main })
+	for _, p in ipairs({ { 12, 12 }, { 7, 12 }, { 12, 7 } }) do
+		local d = Util.Create("Frame", { BorderSizePixel = 0, Position = UDim2.fromOffset(p[1], p[2]), Size = UDim2.fromOffset(3, 3), Parent = grip }, { Util.Corner("full") })
+		T:Bind(d, { BackgroundColor3 = "TextMuted", BackgroundTransparency = function() return 0.4 end })
+	end
+	self.Grip = grip
+
+	-- behaviours ----------------------------------------------------------------------------------------------------
+	local function dragHandlers()
+		local startPtr, startPos
+		return {
+			CanBegin = function() return not self.Maximized end,
+			Began = function(input)
+				startPtr = Util.PointerPos(input)
+				startPos = Vector2.new(holder.Position.X.Offset, holder.Position.Y.Offset)
+				ctx._z = ((ctx._z or 1) % 90) + 1
+				holder.ZIndex = ctx._z
+			end,
+			Changed = function(input)
+				local d = Util.PointerPos(input) - startPtr
+				holder.Position = UDim2.fromOffset(startPos.X + d.X, startPos.Y + d.Y)
+			end,
+			Ended = function() self:_clampToScreen() end,
+		}
+	end
+	self.Maid:Give(Drag.Attach(topbar, dragHandlers()))
+	self.Maid:Give(Drag.Attach(brand, dragHandlers()))
+	do
+		local startPtr, startSize
+		self.Maid:Give(Drag.Attach(grip, {
+			CanBegin = function() return not self.Maximized and not self.Minimized end,
+			Began = function(input) startPtr = Util.PointerPos(input); startSize = self.Size end,
+			Changed = function(input) self:SetSize(startSize + (Util.PointerPos(input) - startPtr)) end,
+		}))
+	end
+
+	self.Maid:Give(minB.Activated:Connect(function() self:Hide(true) end))
+	self.Maid:Give(maxB.Activated:Connect(function() self:ToggleMaximize() end))
+	self.Maid:Give(closeB.Activated:Connect(function()
+		self:PromptDialog({ Name = "Close " .. tostring(props.Name or "window") .. "?", Content = "The interface will be removed. Use minimize to just hide it.",
+			Actions = { Primary = { Name = "Close", Callback = function() self:Destroy() end }, { Name = "Cancel" } } })
+	end))
+	self.Maid:Give(bell.Activated:Connect(function() self:_setNotifOpen(not (self._np and self._np.open)) end))
+
+	self.Maid:Give(UserInputService.InputBegan:Connect(function(input, processed)
+		if input.KeyCode == Enum.KeyCode.Escape and self._popup then self:HidePopup() end
+		if processed or self.ToggleKey == false then return end
+		if input.KeyCode == self.ToggleKey then self:Toggle() end
+	end))
+	self.Maid:Give(holder:GetPropertyChangedSignal("AbsoluteSize"):Connect(function() self:_layout() end))
+	local cam = workspace.CurrentCamera
+	if cam then
+		self.Maid:Give(cam:GetPropertyChangedSignal("ViewportSize"):Connect(function()
+			if not self.Maximized then self:SetSize(self.Size) end
+			self:_clampToScreen()
+		end))
+	end
+
+	self:_buildNotifPanel()
+	self.Maid:Give(ctx.Notifications.Added:Connect(function()
+		if self._np.open then
+			self:_refreshNotifs()
+		else
+			self._unread = self._unread + 1
+			self._bellDot.Visible = true
+		end
+	end))
+
+	self.Configs = Configs.new(ctx, self, props.ConfigFolder or props.Name or "Velt")
+	self:_buildFloating()
+	self.Maid:Give(function()
+		if self.Blur then self.Blur:Destroy() self.Blur = nil end
+	end)
+
+	self:_layout()
+	if props.AutoloadTheme ~= false then self.Configs:LoadAutoloadTheme() end
+	if props.Glass then self:SetGlass(true) end
+	if props.Blur then self:_blur(true) end
+	if props.LoadingEnabled then self:_loading(props.LoadingSettings) end
+	return self
+end
+
+-- sizing / layout ------------------------------------------------------------------------------------------------
+function Shell:_fit(v)
+	local cfg = self.Ctx.Config.Window
+	local vp = Util.Viewport()
+	local maxX, maxY = math.min(cfg.MaxSize.X, vp.X - 16), math.min(cfg.MaxSize.Y, vp.Y - 16)
+	return Vector2.new(Util.Clamp(v.X, math.min(cfg.MinSize.X, maxX), maxX), Util.Clamp(v.Y, math.min(cfg.MinSize.Y, maxY), maxY))
+end
+
+--- Sets the window size (clamped to min/max and the viewport). @param v Vector2
+function Shell:SetSize(v)
+	self.Size = self:_fit(v)
+	if not self.Minimized then self.Holder.Size = UDim2.fromOffset(self.Size.X, self.Size.Y) end
+end
+
+function Shell:_clampToScreen()
+	local vp = Util.Viewport()
+	local p = self.Holder.Position
+	self.Holder.Position = UDim2.fromOffset(Util.Clamp(p.X.Offset, -self.Size.X + 100, vp.X - 100), Util.Clamp(p.Y.Offset, 0, vp.Y - 48))
+end
+
+function Shell:_layout()
+	local w = self.Holder.AbsoluteSize.X
+	if w == 0 then w = self.Size.X end
+	local compact = w < COMPACT_BELOW
+	if compact == self.Compact then return end
+	self.Compact = compact
+	local sw = compact and COMPACT_W or SIDEBAR_W
+	self.Sidebar.Size = UDim2.new(0, sw, 1, 0)
+	self.Content.Position = UDim2.fromOffset(sw, 0)
+	self.Content.Size = UDim2.new(1, -sw, 1, 0)
+	for _, o in ipairs(self._compactHide) do o.Visible = not compact end
+	self.Logo.Position = compact and UDim2.new(0.5, -15, 0.5, 0) or UDim2.new(0, 18, 0.5, 0)
+	if self.Avatar then self.Avatar.Position = compact and UDim2.new(0.5, -17, 0, 8) or UDim2.fromOffset(8, 8) end
+	for _, tab in ipairs(self.Tabs) do tab._applyCompact(compact) end
+end
+
+-- visibility -------------------------------------------------------------------------------------------------------
+function Shell:_blur(on)
+	local Lighting_ = Lighting
+	if on then
+		if not self.Blur then self.Blur = Util.Create("BlurEffect", { Name = "VeltBlur", Size = 0, Parent = Lighting_ }) end
+		self.Blur.Enabled = true
+		self.Ctx.Anim.Tween(self.Blur, { Size = 14 }, 0.3)
+	elseif self.Blur then
+		local blur = self.Blur
+		self.Ctx.Anim.Tween(blur, { Size = 0 }, 0.2)
+		task.delay(0.22, function() if blur.Parent and not self.Glass then blur.Enabled = false end end)
+	end
+end
+
+function Shell:_registerGlass(frame, transparency)
+	table.insert(self._glass, { frame, transparency })
+	if self.Glass then frame.BackgroundTransparency = transparency end
+end
+
+--- Glass mode: translucent surfaces + background blur. @param on boolean
+function Shell:SetGlass(on)
+	self.Glass = on and true or false
+	local Anim = self.Ctx.Anim
+	for _, pair in ipairs({ { self.Main, 0.1 }, { self.Sidebar, 0.15 }, { self.Topbar, 0.2 } }) do
+		Anim.Tween(pair[1], { BackgroundTransparency = on and pair[2] or 0 }, 0.3)
+	end
+	for _, g in ipairs(self._glass) do
+		if g[1].Parent then Anim.Tween(g[1], { BackgroundTransparency = on and g[2] or 0 }, 0.3) end
+	end
+	self:_blur(on)
+end
+
+--- Shows the window.
+function Shell:Show()
+	if self.Visible then return end
+	self.Visible = true
+	self._vtoken = self._vtoken + 1
+	local pos = self.Holder.Position
+	self.Holder.Position = pos + UDim2.fromOffset(0, 14)
+	self.Holder.Visible = true
+	self.Ctx.Anim.Tween(self.Holder, { Position = pos }, self.Ctx.Config.Animation.Normal)
+	if self.Glass then self:_blur(true) end
+	self.Opened:Fire()
+end
+
+--- Hides the window. @param notify boolean|nil show a reminder toast
+function Shell:Hide(notify)
+	if not self.Visible then return end
+	self.Visible = false
+	self._vtoken = self._vtoken + 1
+	local token = self._vtoken
+	self:HidePopup()
+	self:_setNotifOpen(false)
+	local pos = self.Holder.Position
+	self.Ctx.Anim.Tween(self.Holder, { Position = pos + UDim2.fromOffset(0, 14) }, 0.15)
+	if self.Blur then self:_blur(false) end
+	task.delay(0.16, function()
+		if token == self._vtoken then
+			self.Holder.Visible = false
+			self.Holder.Position = pos
+		end
+	end)
+	if notify then
+		local how = self.ToggleKey and ("press " .. self.ToggleKey.Name .. " or tap the round button") or "tap the round button"
+		self.Ctx.Notifications:Notify({ Title = "Interface hidden", Content = "To reopen: " .. how .. ".", Duration = 2.5 })
+	end
+	self.Closed:Fire()
+end
+
+function Shell:Toggle()
+	if self.Visible then self:Hide() else self:Show() end
+end
+
+--- Sets the window toggle key. @param key Enum.KeyCode|false
+function Shell:SetToggleKey(key)
+	self.ToggleKey = key
+end
+
+--- Maximizes / restores.
+function Shell:ToggleMaximize()
+	local Anim, dur = self.Ctx.Anim, self.Ctx.Config.Animation.Normal
+	self:HidePopup()
+	if not self.Maximized then
+		self._restore = { size = self.Size, pos = self.Holder.Position }
+		local vp = Util.Viewport()
+		self.Maximized = true
+		Anim.Tween(self.Holder, { Size = UDim2.fromOffset(vp.X - 40, vp.Y - 40), Position = UDim2.fromOffset(20, 20) }, dur)
+	elseif self._restore then
+		self.Maximized = false
+		self.Size = self._restore.size
+		Anim.Tween(self.Holder, { Size = UDim2.fromOffset(self.Size.X, self.Size.Y), Position = self._restore.pos }, dur)
+	end
+end
+
+-- floating toggle (touch) ------------------------------------------------------------------------------------------
+function Shell:_buildFloating()
+	local props, ctx = self.Props, self.Ctx
+	local touchOnly = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
+	local want = props.FloatingButton
+	if want == nil then want = touchOnly end
+	if not want then return end
+	local T, Config = ctx.Theme, ctx.Config
+	local btn = Util.Create("TextButton", { Name = "VeltFloatingToggle", Text = "", AutoButtonColor = false, BorderSizePixel = 0, ZIndex = 150,
+		Size = UDim2.fromOffset(48, 48), Position = UDim2.fromOffset(16, math.floor(Util.Viewport().Y / 2 - 24)), Parent = self.Gui }, { Util.Corner(16) })
+	local stroke = Util.Stroke(1.5)
+	stroke.Parent = btn
+	T:Bind(btn, { BackgroundColor3 = "Surface" })
+	T:Bind(stroke, { Color = "Accent" })
+	if props.Icon then
+		local img = Util.Create("ImageLabel", { BackgroundTransparency = 1, Size = UDim2.new(1, -16, 1, -16), Position = UDim2.fromOffset(8, 8),
+			Image = ctx:ResolveIcon(props.Icon), ScaleType = Enum.ScaleType.Fit, ZIndex = 151, Parent = btn })
+		T:Bind(img, { ImageColor3 = "Accent" })
+	else
+		local l = Util.Label({ Text = string.upper(tostring(props.Name or "V"):sub(1, 1)), Font = Config.FontBold, TextSize = 22,
+			TextXAlignment = Enum.TextXAlignment.Center, Size = UDim2.fromScale(1, 1), ZIndex = 151, Parent = btn })
+		T:Bind(l, { TextColor3 = "Accent" })
+	end
+	self.Floating = btn
+	self.Maid:Give(btn)
+	local pressing, moved, startPtr, startAbs = false, false, nil, nil
+	self.Maid:Give(btn.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+			pressing, moved = true, false
+			startPtr, startAbs = input.Position, btn.AbsolutePosition
+			input.Changed:Connect(function()
+				if input.UserInputState == Enum.UserInputState.End and pressing then
+					pressing = false
+					if not moved then self:Toggle() end
+				end
+			end)
+		end
+	end))
+	self.Maid:Give(UserInputService.InputChanged:Connect(function(input)
+		if pressing and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+			local d = input.Position - startPtr
+			if not moved and d.Magnitude > 8 then moved = true end
+			if moved then
+				local v = Util.Viewport()
+				btn.Position = UDim2.fromOffset(Util.Clamp(startAbs.X + d.X, 0, v.X - 48), Util.Clamp(startAbs.Y + d.Y, 0, v.Y - 48))
+			end
+		end
+	end))
+end
+
+-- popups ----------------------------------------------------------------------------------------------------------------
+--- Shows a frame in the popup layer (one at a time). A click outside closes it.
+function Shell:ShowPopup(frame, onClose)
+	self:HidePopup()
+	frame.ZIndex = 2
+	frame.Active = true
+	frame.Parent = self.Overlay
+	self.Overlay.Visible = true
+	self._popup = { Frame = frame, OnClose = onClose }
+end
+
+function Shell:HidePopup()
+	local p = self._popup
+	if not p then return end
+	self._popup = nil
+	p.Frame.Parent = nil
+	self.Overlay.Visible = false
+	if p.OnClose then Util.Call(p.OnClose) end
+end
+
+-- notification center -------------------------------------------------------------------------------------------
+function Shell:_buildNotifPanel()
+	local ctx = self.Ctx
+	local Util_, T, Config = Util, ctx.Theme, ctx.Config
+	local W = 310
+	local scrim = Util_.Create("TextButton", { Name = "NotifScrim", Text = "", AutoButtonColor = false, BackgroundColor3 = Color3.new(0, 0, 0),
+		BackgroundTransparency = 1, BorderSizePixel = 0, Visible = false, ZIndex = 34, Size = UDim2.fromScale(1, 1), Parent = self.Main })
+	local panel = Util_.Create("Frame", { Name = "NotifPanel", BorderSizePixel = 0, ZIndex = 35, Active = true, Size = UDim2.new(0, W, 1, 0),
+		Position = UDim2.new(1, 8, 0, 0), Parent = self.Main })
+	T:Bind(panel, { BackgroundColor3 = "Surface" })
+	local pl = Util_.Create("Frame", { BorderSizePixel = 0, Size = UDim2.new(0, 1, 1, 0), Parent = panel })
+	T:Bind(pl, { BackgroundColor3 = "Stroke" })
+	local title = Util_.Label({ Text = "Notifications", Font = Config.FontBold, TextSize = 16, Position = UDim2.fromOffset(20, 0), Size = UDim2.new(1, -110, 0, 54), Parent = panel })
+	T:Bind(title, { TextColor3 = "Text" })
+	local clear = Util_.Create("TextButton", { Name = "Clear", Text = "Clear all", Font = Config.FontBold, TextSize = 12, AutoButtonColor = false,
+		BackgroundTransparency = 1, AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -16, 0, 0), Size = UDim2.fromOffset(70, 54), Parent = panel })
+	T:Bind(clear, { TextColor3 = "Accent" })
+	local list = Util_.Create("ScrollingFrame", { Name = "List", BackgroundTransparency = 1, BorderSizePixel = 0, ScrollBarThickness = 2,
+		CanvasSize = UDim2.new(), AutomaticCanvasSize = Enum.AutomaticSize.Y, Position = UDim2.fromOffset(0, 54), Size = UDim2.new(1, 0, 1, -54), Parent = panel },
+		{ Util_.List(8), Util_.Padding(14, 4, 14, 14) })
+	T:Bind(list, { ScrollBarImageColor3 = "Stroke" })
+	local empty = Util_.Label({ Name = "Empty", Text = "You're all caught up.", TextXAlignment = Enum.TextXAlignment.Center,
+		Position = UDim2.fromOffset(0, 70), Size = UDim2.new(1, 0, 0, 24), Parent = panel })
+	T:Bind(empty, { TextColor3 = "TextMuted" })
+	self._np = { scrim = scrim, panel = panel, list = list, empty = empty, open = false, W = W }
+	self.Maid:Give(scrim.Activated:Connect(function() self:_setNotifOpen(false) end))
+	self.Maid:Give(clear.Activated:Connect(function()
+		table.clear(ctx.Notifications.History)
+		self:_refreshNotifs()
+	end))
+end
+
+function Shell:_refreshNotifs()
+	local np, ctx = self._np, self.Ctx
+	local T, Config = ctx.Theme, ctx.Config
+	for _, c in ipairs(np.list:GetChildren()) do
+		if c:IsA("Frame") then c:Destroy() end
+	end
+	local hist = ctx.Notifications.History
+	np.empty.Visible = #hist == 0
+	local colors = { Info = "Accent", Success = "Success", Warning = "Warning", Error = "Danger" }
+	for i, e in ipairs(hist) do
+		if i > 30 then break end
+		local card = Util.Create("Frame", { Name = "N" .. i, BorderSizePixel = 0, Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
+			LayoutOrder = i, BackgroundColor3 = T:Get("SurfaceAlt"), ClipsDescendants = true, Parent = np.list }, { Util.Corner(10) })
+		Util.Create("Frame", { BorderSizePixel = 0, Size = UDim2.new(0, 3, 1, 0), BackgroundColor3 = T:Get(colors[e.Type] or "Accent"), Parent = card })
+		local inner = Util.Create("Frame", { BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, Parent = card },
+			{ Util.List(2), Util.Padding(16, 10, 12, 10) })
+		Util.Label({ Text = e.Title, Font = Config.FontBold, TextWrapped = true, TextColor3 = T:Get("Text"), Size = UDim2.new(1, 0, 0, 0),
+			AutomaticSize = Enum.AutomaticSize.Y, LayoutOrder = 1, Parent = inner })
+		if e.Content ~= "" then
+			Util.Label({ Text = e.Content, TextSize = Config.TextSizeSmall + 1, TextWrapped = true, TextColor3 = T:Get("TextMuted"),
+				Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, LayoutOrder = 2, Parent = inner })
+		end
+		Util.Label({ Text = ago(e.Time), TextSize = 11, TextColor3 = T:Get("TextMuted"), Size = UDim2.new(1, 0, 0, 14), LayoutOrder = 3, Parent = inner })
+	end
+end
+
+function Shell:_setNotifOpen(open)
+	local np, Anim = self._np, self.Ctx.Anim
+	if not np or np.open == open then return end
+	np.open = open
+	np.scrim.Visible = open
+	Anim.Tween(np.scrim, { BackgroundTransparency = open and 0.5 or 1 }, 0.2)
+	Anim.Tween(np.panel, { Position = open and UDim2.new(1, -np.W, 0, 0) or UDim2.new(1, 8, 0, 0) }, self.Ctx.Config.Animation.Normal)
+	if open then
+		self:_refreshNotifs()
+		self._unread = 0
+		self._bellDot.Visible = false
+	end
+end
+
+--- Shows a toast. @param s table { Title, Content, Type="Info"|"Success"|"Warning"|"Error", Duration }
+function Shell:Notify(s)
+	return self.Ctx.Notifications:Notify(s)
+end
+
+--- Modal dialog. @param s table { Name, Content, Actions = { Primary = {Name, Callback}, {Name, Callback}, ... } }
+function Shell:PromptDialog(s)
+	s = s or {}
+	local buttons, primary = {}, nil
+	for key, a in pairs(s.Actions or {}) do
+		local b = { Text = a.Name, Callback = a.Callback, Style = key == "Primary" and "Solid" or "Outline" }
+		if key == "Primary" then primary = b else table.insert(buttons, b) end
+	end
+	if primary then table.insert(buttons, primary) end
+	return self.Ctx.Notifications:Alert({ Title = s.Name or s.Title, Content = s.Content, Type = s.Kind, Buttons = buttons })
+end
+
+-- loading screen ----------------------------------------------------------------------------------------------------
+function Shell:_loading(ls)
+	ls = ls or {}
+	local ctx = self.Ctx
+	local T, Config, Anim = ctx.Theme, ctx.Config, ctx.Anim
+	local dur = tonumber(ls.Duration) or 2.2
+	local g = Util.Create("CanvasGroup", { Name = "Loading", BorderSizePixel = 0, Active = true, ZIndex = 80, Size = UDim2.fromScale(1, 1), Parent = self.Main })
+	T:Bind(g, { BackgroundColor3 = "Background" })
+	local plr = Players.LocalPlayer
+	local ring = Util.Create("ImageLabel", { Name = "Avatar", BorderSizePixel = 0, AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.new(0.5, 0, 0.5, -84),
+		Size = UDim2.fromOffset(76, 76), Parent = g,
+		Image = (self.Props.Icon and ctx:ResolveIcon(self.Props.Icon)) or (plr and string.format("rbxthumb://type=AvatarHeadShot&id=%d&w=150&h=150", plr.UserId)) or "" },
+		{ Util.Corner("full") })
+	local rs = Util.Stroke(2)
+	rs.Parent = ring
+	T:Bind(ring, { BackgroundColor3 = "SurfaceAlt" })
+	T:Bind(rs, { Color = "Accent" })
+	local title = Util.Label({ Text = tostring(ls.Title or self.Props.Name or "Velt"), Font = Config.FontBold, TextSize = 22, TextXAlignment = Enum.TextXAlignment.Center,
+		AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.new(0.5, 0, 0.5, 6), Size = UDim2.new(1, -40, 0, 28), Parent = g })
+	T:Bind(title, { TextColor3 = "Text" })
+	local sub = Util.Label({ Text = tostring(ls.Subtitle or ("Welcome, " .. (plr and plr.DisplayName or "friend"))), TextXAlignment = Enum.TextXAlignment.Center,
+		AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.new(0.5, 0, 0.5, 36), Size = UDim2.new(1, -40, 0, 20), Parent = g })
+	T:Bind(sub, { TextColor3 = "TextMuted" })
+	local status = Util.Label({ Text = "Initializing", TextSize = 12, TextXAlignment = Enum.TextXAlignment.Center,
+		AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.new(0.5, 0, 0.5, 90), Size = UDim2.new(1, -40, 0, 16), Parent = g })
+	T:Bind(status, { TextColor3 = "TextMuted" })
+	local track = Util.Create("Frame", { BorderSizePixel = 0, AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.new(0.5, 0, 0.5, 74),
+		Size = UDim2.fromOffset(210, 4), Parent = g }, { Util.Corner("full") })
+	T:Bind(track, { BackgroundColor3 = "Track" })
+	local fill = Util.Create("Frame", { BorderSizePixel = 0, Size = UDim2.fromScale(0, 1), Parent = track }, { Util.Corner("full") })
+	T:Bind(fill, { BackgroundColor3 = "Accent" })
+	local steps = { "Initializing", "Loading components", "Applying theme", "Almost ready", "Ready" }
+	Anim.Number(0, 1, dur, "CubicInOut", function(a)
+		fill.Size = UDim2.fromScale(a, 1)
+		status.Text = steps[math.min(#steps, math.floor(a * (#steps - 1)) + 1)]
+	end, function()
+		task.delay(0.2, function()
+			local t = Anim.Tween(g, { GroupTransparency = 1 }, 0.4)
+			if t then t.Completed:Once(function() g:Destroy() end) else g:Destroy() end
+		end)
+	end)
+end
+
+-- tabs --------------------------------------------------------------------------------------------------------------------
+--- Creates a sidebar section (header + tabs). @param name string|nil @return Section
+function Shell:CreateTabSection(name, top)
+	local ctx = self.Ctx
+	local T, Config = ctx.Theme, ctx.Config
+	name = tostring(name or "")
+	local frame = Util.Create("Frame", { Name = "Section_" .. name, BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 0),
+		AutomaticSize = Enum.AutomaticSize.Y, LayoutOrder = top and -1 or (#self.Sections + 1), Parent = self.Nav }, { Util.List(2) })
+	if name ~= "" then
+		local header = Util.Label({ Name = "Header", Text = string.upper(name), Font = Config.FontBold, TextSize = 11, LayoutOrder = 0,
+			Size = UDim2.new(1, 0, 0, 22), Parent = frame })
+		Util.Padding(8, 0).Parent = header
+		T:Bind(header, { TextColor3 = "TextMuted" })
+		table.insert(self._compactHide, header)
+		header.Visible = not self.Compact
+	end
+	local section = setmetatable({ Window = self, Frame = frame, Name = name, Tabs = {} }, Section)
+	table.insert(self.Sections, section)
+	return section
+end
+
+--- Shortcut: creates a tab in a header-less section. @param settings table see Section:CreateTab
+function Shell:CreateTab(settings)
+	if not self._defaultSection then self._defaultSection = self:CreateTabSection("") end
+	return self._defaultSection:CreateTab(settings)
+end
+
+--- Creates a tab. @param settings string|table { Name, Icon, Columns=1..3, Subtitle } @return Tab
+function Section:CreateTab(settings)
+	settings = type(settings) == "string" and { Name = settings } or (settings or {})
+	local win = self.Window
+	local ctx = win.Ctx
+	local T, Config, Anim = ctx.Theme, ctx.Config, ctx.Anim
+	local name = tostring(settings.Name or "Tab")
+	local ncols = math.clamp(math.floor(tonumber(settings.Columns) or 1), 1, 3)
+	local tab = setmetatable({ Window = win, Section = self, Name = name, Subtitle = settings.Subtitle, Columns = {}, Groupboxes = {},
+		NumColumns = ncols, _colCount = {} }, Tab)
+
+	local btn = Util.Create("TextButton", { Name = "Tab_" .. name, Text = "", AutoButtonColor = false, BorderSizePixel = 0, BackgroundTransparency = 1,
+		Size = UDim2.new(1, 0, 0, 38), LayoutOrder = #self.Tabs + 1, Parent = self.Frame }, { Util.Corner(10) })
+	local bar = Util.Create("Frame", { Name = "Indicator", BorderSizePixel = 0, AnchorPoint = Vector2.new(0, 0.5), BackgroundTransparency = 1,
+		Position = UDim2.new(0, 0, 0.5, 0), Size = UDim2.fromOffset(3, 0), Parent = btn }, { Util.Corner("full") })
+	T:Bind(bar, { BackgroundColor3 = "Accent" })
+	local icon
+	if settings.Icon then
+		icon = Util.Create("ImageLabel", { Name = "Icon", BackgroundTransparency = 1, AnchorPoint = Vector2.new(0, 0.5), Size = UDim2.fromOffset(18, 18),
+			Image = ctx:ResolveIcon(settings.Icon), Parent = btn })
+	else
+		icon = Util.Label({ Name = "Monogram", Text = name:sub(1, 1):upper(), Font = Config.FontBold, TextXAlignment = Enum.TextXAlignment.Center,
+			AnchorPoint = Vector2.new(0, 0.5), Size = UDim2.fromOffset(18, 18), Parent = btn })
+	end
+	local label = Util.Label({ Name = "Label", Text = name, Position = UDim2.fromOffset(42, 0), Size = UDim2.new(1, -50, 1, 0),
+		TextTruncate = Enum.TextTruncate.AtEnd, Parent = btn })
+	table.insert(win._compactHide, label)
+	label.Visible = not win.Compact
+	local isImage = icon:IsA("ImageLabel")
+	local hover = false
+	local function render(animate)
+		local active = win.Current == tab
+		local dur = animate and Config.Animation.Fast or 0
+		local col = T:Get(active and "Text" or "TextMuted")
+		Anim.Tween(btn, { BackgroundTransparency = active and 0 or (hover and 0.55 or 1), BackgroundColor3 = T:Get(active and "SurfaceAlt" or "Hover") }, dur)
+		Anim.Tween(label, { TextColor3 = col }, dur)
+		local ic = active and T:Get("Accent") or col
+		Anim.Tween(icon, isImage and { ImageColor3 = ic } or { TextColor3 = ic }, dur)
+		Anim.Tween(bar, { BackgroundTransparency = active and 0 or 1, Size = UDim2.fromOffset(3, active and 18 or 0) }, dur)
+	end
+	tab.Render = render
+	tab._applyCompact = function(compact)
+		icon.Position = compact and UDim2.new(0.5, -9, 0.5, 0) or UDim2.new(0, 16, 0.5, 0)
+	end
+	tab._applyCompact(win.Compact)
+	win.Maid:Give(btn.MouseEnter:Connect(function() hover = true; render(true) end))
+	win.Maid:Give(btn.MouseLeave:Connect(function() hover = false; render(true) end))
+	win.Maid:Give(btn.Activated:Connect(function() win:SelectTab(tab) end))
+	ctx.Theme:Track(tab, function() render(true) end)
+	win.Maid:Give(function() ctx.Theme:Untrack(tab) end)
+
+	local page = Util.Create("Frame", { Name = "Page_" .. name, BackgroundTransparency = 1, Visible = false, Size = UDim2.fromScale(1, 1), Parent = win.Pages },
+		{ Util.List(10, Enum.FillDirection.Horizontal), Util.Padding(14, 14, 14, 0) })
+	for i = 1, ncols do
+		local col = Util.Create("ScrollingFrame", { Name = "Column" .. i, BackgroundTransparency = 1, BorderSizePixel = 0, ScrollBarThickness = 2,
+			CanvasSize = UDim2.new(), AutomaticCanvasSize = Enum.AutomaticSize.Y, LayoutOrder = i,
+			Size = UDim2.new(1 / ncols, -(10 * (ncols - 1)) / ncols, 1, 0), Parent = page }, { Util.List(10), Util.Padding(0, 0, 6, 16) })
+		T:Bind(col, { ScrollBarImageColor3 = "Stroke" })
+		tab.Columns[i] = col
+		tab._colCount[i] = 0
+	end
+	tab.Page, tab.Button = page, btn
+
+	table.insert(self.Tabs, tab)
+	table.insert(win.Tabs, tab)
+	render(false)
+	if not win.Current then win:SelectTab(tab) end
+	return tab
+end
+
+--- Selects a tab with a soft transition. @param tab table|string|number
+function Shell:SelectTab(tab)
+	if type(tab) == "number" then
+		tab = self.Tabs[tab]
+	elseif type(tab) == "string" then
+		for _, t in ipairs(self.Tabs) do
+			if t.Name == tab then tab = t break end
+		end
+	end
+	if type(tab) ~= "table" or self.Current == tab then return end
+	local Anim, Config = self.Ctx.Anim, self.Ctx.Config
+	local prev = self.Current
+	self.Current = tab
+	self:HidePopup()
+	if prev then
+		prev.Page.Visible = false
+		prev.Render(true)
+	end
+	self.TitleLabel.Text = tab.Name
+	self.SubLabel.Text = tostring(tab.Subtitle or self.Props.Subtitle or "")
+	tab.Page.Position = UDim2.fromOffset(0, 8)
+	tab.Page.Visible = true
+	tab.Render(true)
+	Anim.Tween(tab.Page, { Position = UDim2.new() }, Config.Animation.Normal)
+	self.Cover.BackgroundTransparency = 0
+	self.Cover.Visible = true
+	local t = Anim.Tween(self.Cover, { BackgroundTransparency = 1 }, Config.Animation.Normal)
+	if t then
+		t.Completed:Once(function() if self.Current == tab then self.Cover.Visible = false end end)
+	else
+		self.Cover.Visible = false
+	end
+	self.TabChanged:Fire(tab)
+end
+
+--- Selects this tab.
+function Tab:Select()
+	self.Window:SelectTab(self)
+end
+
+--- Adds a groupbox. @param settings table { Name, Icon, Column=1, Collapsed } @return Groupbox
+function Tab:CreateGroupbox(settings)
+	settings = settings or {}
+	local col = math.clamp(math.floor(tonumber(settings.Column) or 1), 1, self.NumColumns)
+	self._colCount[col] = self._colCount[col] + 1
+	settings.Order = self._colCount[col]
+	local gb = Groupbox.new(self.Window.Ctx, self.Window, self.Columns[col], settings)
+	table.insert(self.Groupboxes, gb)
+	return gb
+end
+
+-- builders ---------------------------------------------------------------------------------------------------------------
+--- Config manager box (create / load / overwrite / delete / autoload). Only elements with a Flag are saved.
+function Tab:BuildConfigGroupbox(column)
+	local win = self.Window
+	local cfgs = win.Configs
+	local gb = self:CreateGroupbox({ Name = "Configurations", Icon = nil, Column = column })
+	if not cfgs.FS then
+		gb:CreateParagraph({ Name = "Session-only storage", Content = "Your executor has no file functions, so configs are kept in memory until you leave." })
+	end
+	local selected
+	local nameInput = gb:CreateInput({ Name = "New config", PlaceholderText = "config name", IgnoreConfig = true })
+	local auto = gb:CreateParagraph({ Name = "Autoload", Content = cfgs:GetAutoload("configs") or "none" })
+	local drop
+	local function refresh()
+		drop:SetOptions(cfgs:List("configs"))
+	end
+	drop = gb:CreateDropdown({ Name = "Saved configs", Options = cfgs:List("configs"), Searchable = true, IgnoreConfig = true,
+		Callback = function(v) selected = v end })
+	gb:CreateButton({ Name = "Create config", Style = 1, Callback = function()
+		local ok, err = cfgs:Save(nameInput:Get())
+		win:Notify({ Title = ok and "Config created" or "Could not create", Content = ok and nameInput:Get() or tostring(err), Type = ok and "Success" or "Error" })
+		if ok then nameInput:Set("", true); refresh() end
+	end })
+	gb:CreateButton({ Name = "Load selected", Callback = function()
+		if not selected then return win:Notify({ Title = "Select a config first", Type = "Warning" }) end
+		local ok, err = cfgs:Load(selected)
+		win:Notify({ Title = ok and "Config loaded" or "Load failed", Content = ok and selected or tostring(err), Type = ok and "Success" or "Error" })
+	end })
+	gb:CreateButton({ Name = "Overwrite selected", Callback = function()
+		if not selected then return win:Notify({ Title = "Select a config first", Type = "Warning" }) end
+		local ok, err = cfgs:Save(selected)
+		win:Notify({ Title = ok and "Config updated" or "Save failed", Content = ok and selected or tostring(err), Type = ok and "Success" or "Error" })
+	end })
+	gb:CreateButton({ Name = "Set as autoload", Callback = function()
+		if not selected then return win:Notify({ Title = "Select a config first", Type = "Warning" }) end
+		cfgs:SetAutoload("configs", selected)
+		auto:Set(nil, selected)
+		win:Notify({ Title = "Autoload set", Content = selected, Type = "Success" })
+	end })
+	gb:CreateButton({ Name = "Clear autoload", Callback = function()
+		cfgs:ClearAutoload("configs")
+		auto:Set(nil, "none")
+	end })
+	gb:CreateButton({ Name = "Delete selected", Callback = function()
+		if not selected then return win:Notify({ Title = "Select a config first", Type = "Warning" }) end
+		cfgs:Delete(selected)
+		selected = nil
+		refresh()
+		win:Notify({ Title = "Config deleted", Type = "Info" })
+	end })
+	return gb
+end
+
+--- Theme box: theme list, live color editing, save / autoload custom themes, glass toggle.
+function Tab:BuildThemeGroupbox(column)
+	local win = self.Window
+	local ctx = win.Ctx
+	local T, cfgs = ctx.Theme, win.Configs
+	local gb = self:CreateGroupbox({ Name = "Themes", Column = column })
+	for _, n in ipairs(cfgs:List("themes")) do cfgs:LoadTheme(n) end
+	local drop
+	drop = gb:CreateDropdown({ Name = "Theme", Options = T:List(), CurrentOption = T.Name, IgnoreConfig = true,
+		Callback = function(v) T:Set(v, true) end })
+	gb:CreateToggle({ Name = "Glass (translucent + blur)", CurrentValue = win.Glass == true, Flag = "velt_glass",
+		Callback = function(v) win:SetGlass(v) end })
+	gb:CreateDivider()
+	local tokens = { "Background", "Surface", "SurfaceAlt", "Stroke", "Text", "TextMuted", "Accent", "AccentAlt" }
+	local pickers, editing = {}, false
+	for _, token in ipairs(tokens) do
+		pickers[token] = gb:CreateColorPicker({ Name = token, CurrentValue = T:Get(token), IgnoreConfig = true, Callback = function(c)
+			editing = true
+			T:SetToken(token, c)
+			editing = false
+		end })
+	end
+	self.Window.Maid:Give(T.Changed:Connect(function()
+		if editing then return end
+		for token, p in pairs(pickers) do p:Set(T:Get(token), true) end
+	end))
+	gb:CreateDivider()
+	local nameInput = gb:CreateInput({ Name = "Theme name", PlaceholderText = "my theme", IgnoreConfig = true })
+	local sel
+	local function refresh()
+		local list = T:List()
+		drop:SetOptions(list)
+		drop:Set(T.Name, true)
+		sel = nil
+	end
+	gb:CreateButton({ Name = "Save current as theme", Style = 1, Callback = function()
+		local n = Configs.Clean(nameInput:Get())
+		local ok, err = cfgs:SaveTheme(n)
+		if ok then
+			T:Register(n, table.clone(T.Palette))
+			T:Set(n, false)
+			refresh()
+			nameInput:Set("", true)
+		end
+		win:Notify({ Title = ok and "Theme saved" or "Could not save", Content = ok and n or tostring(err), Type = ok and "Success" or "Error" })
+	end })
+	gb:CreateButton({ Name = "Autoload this theme", Callback = function()
+		if T.Name == "Custom" then return win:Notify({ Title = "Save it first", Content = "Give the theme a name with 'Save current as theme'.", Type = "Warning" }) end
+		cfgs:SetAutoload("themes", T.Name)
+		win:Notify({ Title = "Autoload theme", Content = T.Name, Type = "Success" })
+	end })
+	gb:CreateButton({ Name = "Clear theme autoload", Callback = function() cfgs:ClearAutoload("themes") end })
+	return gb
+end
+
+--- Interface box: menu key, animations and glass quick toggles.
+function Tab:BuildInterfaceGroupbox(column)
+	local win = self.Window
+	local ctx = win.Ctx
+	local gb = self:CreateGroupbox({ Name = "Interface", Column = column })
+	local key = win.ToggleKey and win.ToggleKey.Name or nil
+	gb:CreateLabel({ Name = "Menu key" }):AddBind({ CurrentValue = key, SyncToggleState = false,
+		Callback = function() win:Toggle() end,
+		OnChangedCallback = function(k)
+			local ok, kc = pcall(function() return Enum.KeyCode[k] end)
+			win:SetToggleKey(ok and kc or false)
+		end })
+	gb:CreateToggle({ Name = "Animations", CurrentValue = ctx.Config.Animation.Enabled, Flag = "velt_animations",
+		Callback = function(v)
+			ctx.Config.Animation.Enabled = v
+			ctx.Anim.Enabled = v
+		end })
+	return gb
+end
+
+-- dashboard ---------------------------------------------------------------------------------------------------------------
+--- Dashboard tab with welcome, live session stats and a changelog.
+-- @param s table { Icon, Description, SupportedExecutors={}, UnsupportedExecutors={}, Changelog={{Title, Date, Description}} }
+function Shell:CreateHomeTab(s)
+	s = s or {}
+	if self.HomeTab then return self.HomeTab end
+	local section = self:CreateTabSection("", true)
+	local tab = section:CreateTab({ Name = "Dashboard", Icon = s.Icon, Columns = 2, Subtitle = "Overview" })
+	self.HomeTab = tab
+	local plr = Players.LocalPlayer
+	local executor = "Unknown"
+	if identifyexecutor then
+		local ok, name = pcall(identifyexecutor)
+		if ok and name then executor = tostring(name) end
+	end
+
+	local welcome = tab:CreateGroupbox({ Name = "Welcome", Column = 1 })
+	local hello = welcome:CreateLabel({ Name = "Hello" })
+	local clock = welcome:CreateLabel({ Name = "00:00:00" })
+	welcome:CreateDivider()
+	welcome:CreateParagraph({ Name = tostring(self.Props.Name or "Velt"), Content = tostring(s.Description or "Thanks for using this script. Browse the tabs on the left to get started.") })
+
+	local session = tab:CreateGroupbox({ Name = "Session", Column = 2 })
+	local lPlayers = session:CreateLabel({ Name = "Players" })
+	local lPing = session:CreateLabel({ Name = "Ping" })
+	local lFps = session:CreateLabel({ Name = "FPS" })
+	local exeText = executor
+	for _, n in ipairs(s.SupportedExecutors or {}) do if n == executor then exeText = executor .. "  (supported)" end end
+	for _, n in ipairs(s.UnsupportedExecutors or {}) do if n == executor then exeText = executor .. "  (unsupported)" end end
+	session:CreateLabel({ Name = "Executor: " .. exeText })
+	session:CreateLabel({ Name = "Game: " .. tostring(game.Name) })
+
+	if s.Changelog and #s.Changelog > 0 then
+		local log = tab:CreateGroupbox({ Name = "Changelog", Column = 1 })
+		for i, e in ipairs(s.Changelog) do
+			if i > 5 then break end
+			log:CreateParagraph({ Name = tostring(e.Title or "Update") .. (e.Date and ("  -  " .. tostring(e.Date)) or ""), Content = tostring(e.Description or "") })
+		end
+	end
+
+	local frames, last = 0, os.clock()
+	self.Maid:Give(RunService.Heartbeat:Connect(function()
+		frames = frames + 1
+		local now = os.clock()
+		if now - last < 0.5 then return end
+		local fps = math.floor(frames / (now - last) + 0.5)
+		frames, last = 0, now
+		if not self.Visible or self.Current ~= tab then return end
+		local t = os.date("*t")
+		local greet = t.hour < 5 and "Still up?" or t.hour < 12 and "Good morning" or t.hour < 18 and "Good afternoon" or "Good evening"
+		hello:SetText(greet .. ", " .. (plr and plr.DisplayName or "friend"))
+		clock:SetText(string.format("%02d:%02d:%02d   -   %02d/%02d/%d", t.hour, t.min, t.sec, t.day, t.month, t.year))
+		lPlayers:SetText(string.format("Players: %d / %d", #Players:GetPlayers(), Players.MaxPlayers))
+		lFps:SetText("FPS: " .. fps)
+		local ok, ping = pcall(function() return Stats.Network.ServerStatsItem["Data Ping"]:GetValue() end)
+		lPing:SetText("Ping: " .. (ok and math.floor(ping + 0.5) .. " ms" or "n/a"))
+	end))
+	return tab
+end
+
+--- Runs the saved autoload config, if any (call after all elements are created).
+function Shell:LoadAutoloadConfig()
+	return self.Configs:LoadAutoload()
+end
+
+--- Destroys the window.
+function Shell:Destroy()
+	if self._destroyed then return end
+	self._destroyed = true
+	self.Visible = false
+	for el in pairs(self.Elements) do
+		if type(el) == "table" and el.Destroy then pcall(el.Destroy, el) end
+	end
+	table.clear(self.Elements)
+	for _, tab in ipairs(self.Tabs) do
+		for _, gb in ipairs(tab.Groupboxes) do self.Ctx.Theme:Untrack(gb) end
+	end
+	self.Opened:Destroy()
+	self.Closed:Destroy()
+	self.TabChanged:Destroy()
+	self.Maid:Clean()
+end
+
+return Shell
+
+end
+
+
 -- ===== Core/Signal =====
 rawget(__core, "_kids")["Signal"]._fn = function(script, require)
 --[[
-	Lumen UI :: Core/Signal
+	Velt UI :: Core/Signal
 	Minimal pure-Lua signal (no BindableEvent instances -> cheaper, no instance leaks).
 ]]
 local Signal = {}
@@ -1074,7 +2556,7 @@ end
 -- ===== Core/Theme =====
 rawget(__core, "_kids")["Theme"]._fn = function(script, require)
 --[[
-	Lumen UI :: Core/Theme
+	Velt UI :: Core/Theme
 	Token-based theming. Static colors are registered with Bind(); state-dependent
 	colors are recomputed by components through Track() (ONE loop, no per-element connections).
 ]]
@@ -1152,12 +2634,50 @@ Theme.Palettes = {
 	}),
 }
 
---- @param name string initial palette name (falls back to "Dark")
+-- Velt: warm, clean, elegant ---------------------------------------------------------------
+Theme.Palettes.Velt = extend(Dark, {
+	Background = Color3.fromRGB(24, 21, 19), Surface = Color3.fromRGB(32, 28, 25),
+	SurfaceAlt = Color3.fromRGB(43, 38, 34), Hover = Color3.fromRGB(56, 49, 43),
+	Track = Color3.fromRGB(18, 16, 14), Stroke = Color3.fromRGB(66, 58, 51),
+	Text = Color3.fromRGB(242, 234, 222), TextMuted = Color3.fromRGB(160, 148, 134),
+	Accent = Color3.fromRGB(214, 163, 110), AccentAlt = Color3.fromRGB(236, 200, 152),
+	AccentText = Color3.fromRGB(38, 28, 18), Success = Color3.fromRGB(143, 176, 120),
+	Warning = Color3.fromRGB(232, 184, 96), Danger = Color3.fromRGB(205, 102, 92),
+	Shadow = Color3.fromRGB(8, 6, 5), TooltipBackground = Color3.fromRGB(56, 49, 43),
+	TooltipText = Color3.fromRGB(242, 234, 222),
+})
+Theme.Palettes["Velt Light"] = extend(Theme.Palettes.Velt, {
+	Background = Color3.fromRGB(247, 242, 234), Surface = Color3.fromRGB(255, 252, 246),
+	SurfaceAlt = Color3.fromRGB(239, 232, 220), Hover = Color3.fromRGB(228, 219, 204),
+	Track = Color3.fromRGB(222, 212, 196), Stroke = Color3.fromRGB(214, 203, 186),
+	Text = Color3.fromRGB(56, 46, 38), TextMuted = Color3.fromRGB(132, 117, 102),
+	Accent = Color3.fromRGB(176, 116, 70), AccentAlt = Color3.fromRGB(208, 152, 100),
+	AccentText = Color3.fromRGB(255, 250, 242), Success = Color3.fromRGB(96, 140, 88),
+	Warning = Color3.fromRGB(200, 140, 50), Danger = Color3.fromRGB(190, 80, 70),
+	Shadow = Color3.fromRGB(120, 100, 80), TooltipBackground = Color3.fromRGB(56, 46, 38),
+	TooltipText = Color3.fromRGB(250, 244, 234),
+})
+Theme.Palettes["Velt Rosewood"] = extend(Theme.Palettes.Velt, {
+	Background = Color3.fromRGB(26, 20, 21), Surface = Color3.fromRGB(35, 27, 28),
+	SurfaceAlt = Color3.fromRGB(47, 36, 37), Hover = Color3.fromRGB(61, 47, 48),
+	Track = Color3.fromRGB(19, 14, 15), Stroke = Color3.fromRGB(72, 56, 57),
+	Accent = Color3.fromRGB(212, 140, 140), AccentAlt = Color3.fromRGB(236, 182, 170),
+	AccentText = Color3.fromRGB(42, 22, 22),
+})
+Theme.Palettes["Velt Olive"] = extend(Theme.Palettes.Velt, {
+	Background = Color3.fromRGB(22, 23, 18), Surface = Color3.fromRGB(30, 32, 25),
+	SurfaceAlt = Color3.fromRGB(40, 43, 34), Hover = Color3.fromRGB(52, 56, 44),
+	Track = Color3.fromRGB(16, 17, 13), Stroke = Color3.fromRGB(62, 67, 52),
+	Accent = Color3.fromRGB(184, 190, 120), AccentAlt = Color3.fromRGB(214, 218, 160),
+	AccentText = Color3.fromRGB(28, 30, 16),
+})
+
+--- @param name string initial palette name (falls back to "Velt")
 -- @return Theme
 function Theme.new(name)
 	local self = setmetatable({}, Theme)
 	self.Palettes = table.clone(Theme.Palettes)
-	self.Name = self.Palettes[name] and name or "Dark"
+	self.Name = self.Palettes[name] and name or "Velt"
 	self.Palette = self.Palettes[self.Name]
 	self.Changed = Signal.new()
 	self._bindings = setmetatable({}, { __mode = "k" })
@@ -1221,18 +2741,7 @@ function Theme:Untrack(key)
 	self._trackers[key] = nil
 end
 
---- Switches palette (real-time).
--- @param name string
--- @param animated boolean|nil tween colors
--- @return boolean success
-function Theme:Set(name, animated)
-	local palette = self.Palettes[name]
-	if not palette then
-		warn("[Lumen] unknown theme '" .. tostring(name) .. "'")
-		return false
-	end
-	self.Name = name
-	self.Palette = palette
+function Theme:_refresh(animated)
 	for inst, map in pairs(self._bindings) do
 		if inst.Parent then
 			local goal = {}
@@ -1245,11 +2754,38 @@ function Theme:Set(name, animated)
 	for _, fn in pairs(self._trackers) do
 		local ok, err = pcall(fn, animated)
 		if not ok then
-			warn("[Lumen] theme tracker error: " .. tostring(err))
+			warn("[Velt] theme tracker error: " .. tostring(err))
 		end
 	end
-	self.Changed:Fire(name)
+	self.Changed:Fire(self.Name)
+end
+
+--- Switches palette (real-time).
+-- @param name string
+-- @param animated boolean|nil tween colors
+-- @return boolean success
+function Theme:Set(name, animated)
+	local palette = self.Palettes[name]
+	if not palette then
+		warn("[Velt] unknown theme '" .. tostring(name) .. "'")
+		return false
+	end
+	self.Name = name
+	self.Palette = palette
+	self:_refresh(animated)
 	return true
+end
+
+--- Edits ONE token of the active palette (clones it into a "Custom" palette first, built-ins stay untouched).
+-- @param token string @param color Color3
+function Theme:SetToken(token, color)
+	if self.Name ~= "Custom" then
+		self.Palettes.Custom = table.clone(self.Palette)
+		self.Name = "Custom"
+		self.Palette = self.Palettes.Custom
+	end
+	self.Palette[token] = color
+	self:_refresh(false)
 end
 
 return Theme
@@ -1260,7 +2796,7 @@ end
 -- ===== Core/Tooltip =====
 rawget(__core, "_kids")["Tooltip"]._fn = function(script, require)
 --[[
-	Lumen UI :: Core/Tooltip
+	Velt UI :: Core/Tooltip
 	One shared tooltip frame. Smart positioning (flips at screen edges), themed (dark/light),
 	disabled automatically on touch-only devices.
 ]]
@@ -1371,7 +2907,7 @@ end
 -- ===== Core/Util =====
 rawget(__core, "_kids")["Util"]._fn = function(script, require)
 --[[
-	Lumen UI :: Core/Util
+	Velt UI :: Core/Util
 	Shared helpers: instance builders, math, colors, safe calls, pointer math.
 ]]
 local UserInputService = game:GetService("UserInputService")
@@ -1523,7 +3059,7 @@ function Util.Call(fn, ...)
 		return debug.traceback(tostring(e), 2)
 	end, ...)
 	if not ok then
-		warn("[Lumen] callback error: " .. tostring(err))
+		warn("[Velt] callback error: " .. tostring(err))
 	end
 end
 
@@ -1535,7 +3071,7 @@ function Util.Expect(props, key, expected, default)
 		return default
 	end
 	if typeof(v) ~= expected then
-		warn(string.format("[Lumen] '%s' expected %s, got %s (using default)", key, expected, typeof(v)))
+		warn(string.format("[Velt] '%s' expected %s, got %s (using default)", key, expected, typeof(v)))
 		return default
 	end
 	return v
@@ -1594,7 +3130,7 @@ end
 -- ===== Core/Window =====
 rawget(__core, "_kids")["Window"]._fn = function(script, require)
 --[[
-	Lumen UI :: Core/Window
+	Velt UI :: Core/Window
 	Draggable / resizable / minimizable window with sidebar tabs, blur + shadow,
 	popup layer (dropdowns, color picker), responsive layout and keyboard navigation.
 	Mounts: "Screen" (default), "Surface" (SurfaceGui) or "Billboard" (BillboardGui).
@@ -1620,14 +3156,14 @@ local function createMount(ctx, props)
 	local playerGui = ctx.GuiParent or Players.LocalPlayer:WaitForChild("PlayerGui")
 	if props.Mount == "Surface" then
 		return Util.Create("SurfaceGui", {
-			Name = "LumenSurface", Adornee = props.Adornee, Face = props.Face or Enum.NormalId.Front,
+			Name = "VeltSurface", Adornee = props.Adornee, Face = props.Face or Enum.NormalId.Front,
 			SizingMode = Enum.SurfaceGuiSizingMode.FixedSize, CanvasSize = props.CanvasSize or Vector2.new(900, 600),
 			AlwaysOnTop = props.AlwaysOnTop == true, ResetOnSpawn = false,
 			ZIndexBehavior = Enum.ZIndexBehavior.Sibling, Parent = playerGui,
 		})
 	end
 	return Util.Create("BillboardGui", {
-		Name = "LumenBillboard", Adornee = props.Adornee, Size = props.BillboardSize or UDim2.fromOffset(560, 380),
+		Name = "VeltBillboard", Adornee = props.Adornee, Size = props.BillboardSize or UDim2.fromOffset(560, 380),
 		StudsOffset = props.StudsOffset or Vector3.new(0, 3, 0), AlwaysOnTop = props.AlwaysOnTop == true,
 		MaxDistance = props.MaxDistance or 100, Active = true, ResetOnSpawn = false,
 		ZIndexBehavior = Enum.ZIndexBehavior.Sibling, Parent = playerGui,
@@ -1912,7 +3448,7 @@ function Window:_blur(on)
 	if self.Is3D or self.Props.Blur == false or not self.Ctx.Config.Window.Blur then return end
 	if on then
 		if not self.Blur then
-			self.Blur = Util.Create("BlurEffect", { Name = "LumenBlur", Size = 0, Parent = Lighting })
+			self.Blur = Util.Create("BlurEffect", { Name = "VeltBlur", Size = 0, Parent = Lighting })
 		end
 		self.Blur.Enabled = true
 		self.Ctx.Anim.Tween(self.Blur, { Size = self.Ctx.Config.Window.BlurSize }, 0.3)
@@ -2156,7 +3692,7 @@ end
 -- ===== Components/Basic =====
 rawget(__comp, "_kids")["Basic"]._fn = function(script, require)
 --[[
-	Lumen UI :: Components/Basic
+	Velt UI :: Components/Basic
 	Label, Section, Divider — static, theme-bound elements.
 ]]
 local Element = require(script.Parent.Element)
@@ -2235,7 +3771,273 @@ function Divider.new(container, props)
 end
 Basic.Divider = Divider
 
+-- LabelRow (text row that can host nested bind / color chips) -------------------------------------
+local LabelRow = Element.extend()
+LabelRow.__index = LabelRow
+
+--- @param container table @param props table { Text }
+function LabelRow.new(container, props)
+	local ctx = container.Ctx
+	local Util = ctx.Util
+	local self = setmetatable({}, LabelRow)
+	local row = Util.Create("Frame", { Name = "LabelRow", BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 30),
+		LayoutOrder = container:_nextOrder(), Parent = container.Frame })
+	self.Label = Util.Label({ Name = "Label", Text = tostring(props.Text or ""), Position = UDim2.fromOffset(4, 0),
+		Size = UDim2.new(1, -8, 1, 0), TextTruncate = Enum.TextTruncate.AtEnd, Parent = row })
+	ctx.Theme:Bind(self.Label, { TextColor3 = "Text" })
+	self._accRight = 4
+	self:_init(container, row, props, "label")
+	return self
+end
+
+--- Changes the text. @param text string
+function LabelRow:SetText(text)
+	self.Label.Text = tostring(text)
+end
+Basic.LabelRow = LabelRow
+
+-- Paragraph --------------------------------------------------------------------------------------------
+local Paragraph = Element.extend()
+Paragraph.__index = Paragraph
+
+--- @param container table @param props table { Title, Content }
+function Paragraph.new(container, props)
+	local ctx = container.Ctx
+	local Util, Config = ctx.Util, ctx.Config
+	local self = setmetatable({}, Paragraph)
+	local box = Util.Create("Frame", { Name = "Paragraph", BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 0),
+		AutomaticSize = Enum.AutomaticSize.Y, LayoutOrder = container:_nextOrder(), Parent = container.Frame },
+		{ Util.List(3), Util.Padding(4, 2) })
+	self.Title = Util.Label({ Name = "Title", Text = tostring(props.Title or props.Name or ""), Font = Config.FontBold,
+		Size = UDim2.new(1, 0, 0, 18), LayoutOrder = 1, Visible = (props.Title or props.Name) ~= nil, Parent = box })
+	self.Content = Util.Label({ Name = "Content", Text = tostring(props.Content or ""), TextSize = Config.TextSizeSmall + 1,
+		TextWrapped = true, TextYAlignment = Enum.TextYAlignment.Top, Size = UDim2.new(1, 0, 0, 0),
+		AutomaticSize = Enum.AutomaticSize.Y, LayoutOrder = 2, Parent = box })
+	ctx.Theme:Bind(self.Title, { TextColor3 = "Text" })
+	ctx.Theme:Bind(self.Content, { TextColor3 = "TextMuted" })
+	self:_init(container, box, props, "paragraph")
+	return self
+end
+
+--- @param title string|nil @param content string|nil
+function Paragraph:Set(title, content)
+	if title ~= nil then self.Title.Text = tostring(title); self.Title.Visible = true end
+	if content ~= nil then self.Content.Text = tostring(content) end
+end
+Basic.Paragraph = Paragraph
+
 return Basic
+
+end
+
+
+-- ===== Components/Bind =====
+rawget(__comp, "_kids")["Bind"]._fn = function(script, require)
+--[[
+	Velt UI :: Components/Bind
+	Keybind element. Row form (tab:AddBind) or inline chip on a Toggle / LabelRow (toggle:AddBind).
+	Modes: "Toggle" (press flips state) or "Hold" (active while held). Keys: keyboard names ("Q") or "MB1"/"MB2"/"MB3".
+	Click the chip, press a key to set it; Esc cancels, Backspace/Delete clears.
+	Usage: box:CreateBind({ Name = "Fly", CurrentValue = "F", Callback = function(active) end })
+	       toggle:AddBind({ CurrentValue = "G" })   -- syncs the parent toggle automatically
+	One shared InputBegan/InputEnded listener serves every bind.
+]]
+local UserInputService = game:GetService("UserInputService")
+local Element = require(script.Parent.Element)
+
+local Bind = Element.extend()
+
+local registry, connBegan, connEnded, total = {}, nil, nil, 0
+
+local function keyName(input)
+	local t = input.UserInputType
+	if t == Enum.UserInputType.Keyboard then return input.KeyCode.Name end
+	if t == Enum.UserInputType.MouseButton1 then return "MB1" end
+	if t == Enum.UserInputType.MouseButton2 then return "MB2" end
+	if t == Enum.UserInputType.MouseButton3 then return "MB3" end
+	return nil
+end
+
+local function matches(input, name)
+	if name == "MB1" then return input.UserInputType == Enum.UserInputType.MouseButton1 end
+	if name == "MB2" then return input.UserInputType == Enum.UserInputType.MouseButton2 end
+	if name == "MB3" then return input.UserInputType == Enum.UserInputType.MouseButton3 end
+	return input.UserInputType == Enum.UserInputType.Keyboard and input.KeyCode.Name == name
+end
+
+local function snapshot()
+	local list = {}
+	for b in pairs(registry) do table.insert(list, b) end
+	return list
+end
+
+local function onBegan(input, processed)
+	local binds = snapshot()
+	for _, b in ipairs(binds) do
+		if b.Listening then
+			if os.clock() - b.ListenStart > 0.12 then
+				if input.KeyCode == Enum.KeyCode.Escape then
+					b:_stopListen()
+				elseif input.KeyCode == Enum.KeyCode.Backspace or input.KeyCode == Enum.KeyCode.Delete then
+					b:Set(nil)
+					b:_stopListen()
+				else
+					local name = keyName(input)
+					if name then b:Set(name); b:_stopListen() end
+				end
+			end
+			return
+		end
+	end
+	if processed or UserInputService:GetFocusedTextBox() then return end
+	for _, b in ipairs(binds) do
+		if b.Enabled and b.Key and matches(input, b.Key) then b:_trigger(true) end
+	end
+end
+
+local function onEnded(input)
+	for _, b in ipairs(snapshot()) do
+		if b.Mode == "Hold" and b.Active and b.Key and matches(input, b.Key) then b:_trigger(false) end
+	end
+end
+
+local function acquire()
+	total = total + 1
+	if total == 1 then
+		connBegan = UserInputService.InputBegan:Connect(onBegan)
+		connEnded = UserInputService.InputEnded:Connect(onEnded)
+	end
+end
+
+local function release()
+	total = total - 1
+	if total <= 0 then
+		total = 0
+		if connBegan then connBegan:Disconnect() connBegan = nil end
+		if connEnded then connEnded:Disconnect() connEnded = nil end
+	end
+end
+
+--- @param container table
+-- @param props table { Text, CurrentValue=string|nil, Mode="Toggle"|"Hold", Callback(active), OnChanged(key), Host=Frame (inline), Parent=Element, SyncToggle }
+-- @return Bind
+function Bind.new(container, props)
+	local ctx = container.Ctx
+	local Util, Config = ctx.Util, ctx.Config
+	local self = setmetatable({}, Bind)
+	self.Mode = props.Mode == "Hold" and "Hold" or "Toggle"
+	self.Key = type(props.CurrentValue) == "string" and props.CurrentValue ~= "" and props.CurrentValue or nil
+	self.Active = false
+	self.Listening = false
+	self.ListenStart = 0
+	self.Parent = props.Parent
+	self.Inline = props.Host ~= nil
+
+	local root, row, stroke
+	local chipParent
+	if self.Inline then
+		chipParent = props.Host
+	else
+		row, stroke = Element.CreateRow(container, props, nil, "Frame")
+		self.Row, self.Stroke = row, stroke
+		self.Label = Util.Label({ Name = "Label", Text = tostring(props.Text or "Keybind"), Position = UDim2.fromOffset(12, 0),
+			Size = UDim2.new(1, -110, 1, 0), TextTruncate = Enum.TextTruncate.AtEnd, Parent = row })
+		chipParent = row
+	end
+	local chip = Util.Create("TextButton", {
+		Name = "BindChip", AutoButtonColor = false, BorderSizePixel = 0, Font = Config.FontBold, TextSize = Config.TextSizeSmall,
+		Size = UDim2.fromOffset(0, 22), AutomaticSize = Enum.AutomaticSize.X, Text = "",
+		AnchorPoint = self.Inline and Vector2.new(0, 0) or Vector2.new(1, 0.5),
+		Position = self.Inline and UDim2.new() or UDim2.new(1, -12, 0.5, 0), Parent = chipParent,
+	}, { Util.Corner(6), Util.Padding(10, 0) })
+	local cstroke = Util.Stroke(1)
+	cstroke.Parent = chip
+	self.Chip, self.ChipStroke = chip, cstroke
+	root = self.Inline and chip or row
+
+	self:_init(container, root, props, "keybind")
+	self.Maid:Give(function()
+		registry[self] = nil
+		release()
+	end)
+	registry[self] = true
+	acquire()
+
+	self.Maid:Give(chip.Activated:Connect(function()
+		if not self.Enabled then return end
+		if self.Listening then self:_stopListen() else self:_startListen() end
+	end))
+	if not self.Inline then self:_interact(row) end
+	self:_render(false)
+	self:_text()
+	return self
+end
+
+function Bind:_text()
+	if self.Listening then
+		self.Chip.Text = "..."
+	else
+		self.Chip.Text = self.Key and string.upper(self.Key) or "NONE"
+	end
+end
+
+function Bind:_startListen()
+	self.Listening = true
+	self.ListenStart = os.clock()
+	self:_text()
+	self:_render(true)
+end
+
+function Bind:_stopListen()
+	self.Listening = false
+	self:_text()
+	self:_render(true)
+end
+
+function Bind:_trigger(began)
+	if self.Mode == "Hold" then
+		if began == self.Active then return end
+		self.Active = began
+	else
+		if not began then return end
+		self.Active = not self.Active
+	end
+	self:_fire(self.Active)
+	if self.Props.SyncToggle ~= false and self.Parent and self.Parent.Set then
+		self.Parent:Set(self.Active)
+	end
+end
+
+--- Called by a parent Toggle when its value changes.
+function Bind:OnParentChanged(value)
+	self.Active = value
+end
+
+--- Sets the key. @param key string|nil "Q", "MB2", ... @param silent boolean|nil
+function Bind:Set(key, silent)
+	self.Key = type(key) == "string" and key ~= "" and key or nil
+	self:_text()
+	if not silent then
+		self.Ctx.Util.Call(self.Props.OnChanged, self.Key)
+		self.Changed:Fire(self.Key)
+	end
+end
+
+--- @return string|nil current key name
+function Bind:Get()
+	return self.Key
+end
+
+function Bind:_render(animate)
+	local T, Anim = self.Ctx.Theme, self.Ctx.Anim
+	local dur = animate and self.Ctx.Config.Animation.Fast or 0
+	if not self.Inline then self:_renderRow(self.Row, self.Stroke, animate) end
+	Anim.Tween(self.Chip, { BackgroundColor3 = T:Get(self.Listening and "Accent" or "Track") }, dur)
+	Anim.Tween(self.ChipStroke, { Color = T:Get(self.Listening and "Accent" or "Stroke") }, dur)
+	self.Chip.TextColor3 = T:Get(self.Listening and "AccentText" or (self.Key and "Text" or "TextMuted"))
+end
+
+return Bind
 
 end
 
@@ -2243,7 +4045,7 @@ end
 -- ===== Components/Button =====
 rawget(__comp, "_kids")["Button"]._fn = function(script, require)
 --[[
-	Lumen UI :: Components/Button
+	Velt UI :: Components/Button
 	Styles: Solid | Outline | Gradient | Ghost. Hover / press / focus states and a click ripple.
 	Usage: tab:AddButton({ Text = "Save", Style = "Gradient", Callback = function() end })
 ]]
@@ -2258,7 +4060,7 @@ function Button.new(container, props)
 	local ctx = container.Ctx
 	local Util, Config, T = ctx.Util, ctx.Config, ctx.Theme
 	local self = setmetatable({}, Button)
-	self.Style = ({ Solid = "Solid", Outline = "Outline", Gradient = "Gradient", Ghost = "Ghost" })[props.Style or "Solid"] or "Solid"
+	self.Style = ({ Solid = "Solid", Outline = "Outline", Gradient = "Gradient", Ghost = "Ghost", Flat = "Flat" })[props.Style or "Solid"] or "Solid"
 
 	local row, stroke = Element.CreateRow(container, props, nil, "TextButton")
 	row.ClipsDescendants = true
@@ -2341,6 +4143,11 @@ function Button:_render(animate)
 		bg = accent
 		bgT = S.press and 0.75 or (S.hover and 0.88 or 1)
 		textColor, strokeColor, strokeT = accent, accent, 0
+	elseif self.Style == "Flat" then
+		bg = T:Get(S.press and "Track" or ((S.hover or S.focus) and "Hover" or "SurfaceAlt"))
+		bgT = dim
+		textColor = T:Get("Text")
+		strokeColor, strokeT = T:Get("Stroke"), 0.2
 	else -- Ghost
 		bg = T:Get("Hover")
 		bgT = S.press and 0.2 or (S.hover and 0.5 or 1)
@@ -2353,7 +4160,7 @@ function Button:_render(animate)
 		textColor = T:Get("TextMuted")
 	end
 	Anim.Tween(self.Row, { BackgroundColor3 = bg, BackgroundTransparency = bgT }, dur)
-	Anim.Tween(self.Stroke, { Color = strokeColor, Transparency = strokeT, Thickness = S.focus and 2 or 1.5 }, dur)
+	Anim.Tween(self.Stroke, { Color = strokeColor, Transparency = strokeT, Thickness = S.focus and 2 or (self.Style == "Flat" and 1 or 1.5) }, dur)
 	Anim.Tween(self.Label, { TextColor3 = textColor }, dur)
 	if self.Icon then
 		Anim.Tween(self.Icon, { ImageColor3 = textColor }, dur)
@@ -2374,7 +4181,7 @@ end
 
 --- Changes the style. @param style string "Solid"|"Outline"|"Gradient"|"Ghost"
 function Button:SetStyle(style)
-	self.Style = ({ Solid = "Solid", Outline = "Outline", Gradient = "Gradient", Ghost = "Ghost" })[style] or self.Style
+	self.Style = ({ Solid = "Solid", Outline = "Outline", Gradient = "Gradient", Ghost = "Ghost", Flat = "Flat" })[style] or self.Style
 	self.Gradient.Enabled = self.Style == "Gradient"
 	self:_render(true)
 end
@@ -2387,7 +4194,7 @@ end
 -- ===== Components/Checkbox =====
 rawget(__comp, "_kids")["Checkbox"]._fn = function(script, require)
 --[[
-	Lumen UI :: Components/Checkbox
+	Velt UI :: Components/Checkbox
 	Usage: local c = tab:AddCheckbox({ Text = "Remember me", Default = true, Color = Color3.fromRGB(52,211,153) })
 ]]
 local Element = require(script.Parent.Element)
@@ -2453,7 +4260,7 @@ end
 -- ===== Components/ColorPicker =====
 rawget(__comp, "_kids")["ColorPicker"]._fn = function(script, require)
 --[[
-	Lumen UI :: Components/ColorPicker
+	Velt UI :: Components/ColorPicker
 	Saturation/value square, hue bar, hex + RGB inputs, optional 2-stop gradient mode.
 	Usage: local c = tab:AddColorPicker({ Text = "Accent", Default = Color3.fromRGB(110,99,255), Callback = function(color) end })
 	       tab:AddColorPicker({ Text = "Fade", Gradient = true, Default = {Color3.new(1,0,0), Color3.new(0,0,1)},
@@ -2490,15 +4297,27 @@ function ColorPicker.new(container, props)
 	end
 	self.H, self.S, self.V = self.Colors[1]:ToHSV()
 
-	local row, stroke = Element.CreateRow(container, props, nil, "TextButton")
-	self.Row, self.Stroke = row, stroke
-	self.Label = Util.Label({ Name = "Label", Text = tostring(props.Text or "Color"), Position = UDim2.fromOffset(12, 0),
-		Size = UDim2.new(1, -80, 1, 0), TextTruncate = Enum.TextTruncate.AtEnd, Parent = row })
-	self.Swatch = Util.Create("Frame", { Name = "Swatch", BorderSizePixel = 0, AnchorPoint = Vector2.new(1, 0.5),
-		Position = UDim2.new(1, -12, 0.5, 0), Size = UDim2.fromOffset(46, 20), Parent = row }, { Util.Corner(5) })
-	self.SwatchStroke = Util.Stroke(1)
-	self.SwatchStroke.Parent = self.Swatch
-	self.SwatchGradient = Util.Create("UIGradient", { Enabled = self.Gradient, Parent = self.Swatch })
+	local row, stroke
+	self.Inline = props.Host ~= nil
+	if self.Inline then
+		row = Util.Create("TextButton", { Name = "ColorChip", Text = "", AutoButtonColor = false, BorderSizePixel = 0,
+			Size = UDim2.fromOffset(32, 20), Parent = props.Host }, { Util.Corner(6) })
+		stroke = Util.Stroke(1, ctx.Theme:Get("Stroke"))
+		stroke.Parent = row
+		self.Row, self.Stroke = row, stroke
+		self.Swatch, self.SwatchStroke = row, stroke
+		self.SwatchGradient = Util.Create("UIGradient", { Enabled = self.Gradient, Parent = row })
+	else
+		row, stroke = Element.CreateRow(container, props, nil, "TextButton")
+		self.Row, self.Stroke = row, stroke
+		self.Label = Util.Label({ Name = "Label", Text = tostring(props.Text or "Color"), Position = UDim2.fromOffset(12, 0),
+			Size = UDim2.new(1, -80, 1, 0), TextTruncate = Enum.TextTruncate.AtEnd, Parent = row })
+		self.Swatch = Util.Create("Frame", { Name = "Swatch", BorderSizePixel = 0, AnchorPoint = Vector2.new(1, 0.5),
+			Position = UDim2.new(1, -12, 0.5, 0), Size = UDim2.fromOffset(46, 20), Parent = row }, { Util.Corner(5) })
+		self.SwatchStroke = Util.Stroke(1)
+		self.SwatchStroke.Parent = self.Swatch
+		self.SwatchGradient = Util.Create("UIGradient", { Enabled = self.Gradient, Parent = self.Swatch })
+	end
 
 	self:_init(container, row, props, "colorpicker")
 	self:_interact(row)
@@ -2732,7 +4551,7 @@ function ColorPicker:GetColors()
 end
 
 function ColorPicker:_render(animate)
-	self:_renderRow(self.Row, self.Stroke, animate)
+	if not self.Inline then self:_renderRow(self.Row, self.Stroke, animate) end
 	self.SwatchStroke.Color = self.Ctx.Theme:Get("Stroke")
 	if self.Popup then
 		self:_skinPopup()
@@ -2748,7 +4567,7 @@ end
 -- ===== Components/Dropdown =====
 rawget(__comp, "_kids")["Dropdown"]._fn = function(script, require)
 --[[
-	Lumen UI :: Components/Dropdown
+	Velt UI :: Components/Dropdown
 	Searchable, multi-select option, pooled option rows, flips upward when there is no room below.
 	Usage: local d = tab:AddDropdown({ Text = "Map", Options = {"Forest","Desert","Snow"}, Default = "Forest",
 	           Searchable = true, Callback = function(value) end })
@@ -3077,7 +4896,7 @@ end
 -- ===== Components/Element =====
 rawget(__comp, "_kids")["Element"]._fn = function(script, require)
 --[[
-	Lumen UI :: Components/Element
+	Velt UI :: Components/Element
 	Base class for all components: lifecycle (Maid), hover/press/focus state, tooltip,
 	keyboard-focus registration, themed row rendering.
 ]]
@@ -3126,6 +4945,14 @@ function Element:_init(container, root, props, role)
 	self.State = { hover = false, press = false, focus = false }
 	self.Maid:Give(self.Changed)
 	self.Maid:Give(root)
+	self.Attached = {}
+	local window = container.Window
+	if props.Flag and window and window.Flags then
+		window.Flags[props.Flag] = self
+		self.Maid:Give(function()
+			if window.Flags[props.Flag] == self then window.Flags[props.Flag] = nil end
+		end)
+	end
 	root:SetAttribute("A11yRole", role or "element")
 	root:SetAttribute("A11yLabel", tostring(props.Text or props.Name or ""))
 	ctx.Theme:Track(self, function(animated)
@@ -3240,6 +5067,74 @@ function Element:_renderRow(row, stroke, animate, state)
 	end
 end
 
+-- accessories (nested Bind / ColorPicker chips) ---------------------------------------------------
+function Element:_accessoryHost()
+	if self._acc then return self._acc end
+	local Util = self.Ctx.Util
+	self._acc = Util.Create("Frame", {
+		Name = "Accessories", BackgroundTransparency = 1, AnchorPoint = Vector2.new(1, 0.5),
+		Position = UDim2.new(1, -(self._accRight or 12), 0.5, 0), Size = UDim2.fromOffset(0, 24),
+		AutomaticSize = Enum.AutomaticSize.X, ZIndex = 3, Parent = self.Root,
+	})
+	local l = Util.List(6, Enum.FillDirection.Horizontal)
+	l.HorizontalAlignment = Enum.HorizontalAlignment.Right
+	l.VerticalAlignment = Enum.VerticalAlignment.Center
+	l.Parent = self._acc
+	return self._acc
+end
+
+--- Attaches a keybind chip to this element (Toggle / Label rows).
+-- @param s table { CurrentValue="Q", HoldToInteract, Callback(active), OnChangedCallback(key), SyncToggleState }
+-- @return Bind
+function Element:AddBind(s)
+	assert(self._accRight, "this element cannot host a nested bind")
+	s = s or {}
+	local el = self.Container:_add("Bind", { Host = self:_accessoryHost(), Parent = self, Text = "Bind",
+		Mode = s.HoldToInteract and "Hold" or "Toggle", CurrentValue = s.CurrentValue, Callback = s.Callback,
+		OnChanged = s.OnChangedCallback or s.OnChanged, SyncToggle = s.SyncToggleState, Flag = s.Flag })
+	table.insert(self.Attached, el)
+	return el
+end
+
+--- Attaches a color chip to this element (Toggle / Label rows).
+-- @param s table { CurrentValue=Color3, Callback(color) }
+-- @return ColorPicker
+function Element:AddColorPicker(s)
+	assert(self._accRight, "this element cannot host a nested color picker")
+	s = s or {}
+	local el = self.Container:_add("ColorPicker", { Host = self:_accessoryHost(), Text = "Color",
+		Default = s.CurrentValue or s.Default, Callback = s.Callback, Flag = s.Flag })
+	table.insert(self.Attached, el)
+	return el
+end
+
+-- lock overlay -------------------------------------------------------------------------------------
+--- Locks the element (blocks input, shows an optional reason). @param reason string|nil
+function Element:Lock(reason)
+	local ctx = self.Ctx
+	self._locked, self.Enabled = true, false
+	if not self._lockFrame then
+		local Util = ctx.Util
+		self._lockFrame = Util.Create("TextButton", { Name = "Lock", Text = "", AutoButtonColor = false, BorderSizePixel = 0,
+			ZIndex = 20, Size = UDim2.fromScale(1, 1), Parent = self.Root }, { Util.Corner(ctx.Config.RadiusSmall) })
+		self._lockText = Util.Label({ Name = "Reason", Font = ctx.Config.FontBold, TextSize = ctx.Config.TextSizeSmall,
+			TextXAlignment = Enum.TextXAlignment.Center, Size = UDim2.fromScale(1, 1), ZIndex = 21, Parent = self._lockFrame })
+	end
+	self._lockFrame.BackgroundColor3 = ctx.Theme:Get("Surface")
+	self._lockFrame.BackgroundTransparency = 0.25
+	self._lockText.TextColor3 = ctx.Theme:Get("TextMuted")
+	self._lockText.Text = reason and ("LOCKED  -  " .. tostring(reason)) or "LOCKED"
+	self._lockFrame.Visible = true
+	if self._render then self:_render(true) end
+end
+
+--- Removes the lock.
+function Element:Unlock()
+	self._locked, self.Enabled = false, true
+	if self._lockFrame then self._lockFrame.Visible = false end
+	if self._render then self:_render(true) end
+end
+
 function Element:_render() end
 
 return Element
@@ -3250,7 +5145,7 @@ end
 -- ===== Components/ProgressBar =====
 rawget(__comp, "_kids")["ProgressBar"]._fn = function(script, require)
 --[[
-	Lumen UI :: Components/ProgressBar
+	Velt UI :: Components/ProgressBar
 	Linear or circular, percentage display, animated fill.
 	Usage: local p = tab:AddProgressBar({ Text = "Download", Value = 0, Style = "Circular" })
 	       p:SetValue(65)
@@ -3386,7 +5281,7 @@ end
 -- ===== Components/RadioGroup =====
 rawget(__comp, "_kids")["RadioGroup"]._fn = function(script, require)
 --[[
-	Lumen UI :: Components/RadioGroup
+	Velt UI :: Components/RadioGroup
 	Group management: exactly one option selected at a time.
 	Usage: local r = tab:AddRadioGroup({ Text = "Quality", Options = {"Low","Medium","High"}, Default = "Medium",
 	           Callback = function(value) end })
@@ -3516,7 +5411,7 @@ end
 -- ===== Components/Slider =====
 rawget(__comp, "_kids")["Slider"]._fn = function(script, require)
 --[[
-	Lumen UI :: Components/Slider
+	Velt UI :: Components/Slider
 	Horizontal or vertical, custom range / step, editable value box, smooth animation,
 	keyboard adjust (Left/Right, hold Shift for x10).
 	Usage: local s = tab:AddSlider({ Text = "Speed", Min = 0, Max = 100, Default = 40, Step = 1, Suffix = "%",
@@ -3688,7 +5583,7 @@ end
 -- ===== Components/TabGroup =====
 rawget(__comp, "_kids")["TabGroup"]._fn = function(script, require)
 --[[
-	Lumen UI :: Components/TabGroup
+	Velt UI :: Components/TabGroup
 	Nested tabs inside a tab page: segmented strip with a sliding indicator.
 	Usage: local g = tab:AddTabGroup({ Tabs = {"General", "Advanced"}, Default = 1 })
 	       g.Tabs.General:AddToggle({ ... })     -- also g.Tabs[1]
@@ -3778,7 +5673,7 @@ end
 -- ===== Components/Textbox =====
 rawget(__comp, "_kids")["Textbox"]._fn = function(script, require)
 --[[
-	Lumen UI :: Components/Textbox
+	Velt UI :: Components/Textbox
 	Placeholder, validation (Validate fn / Pattern / Numeric / Required), password mode, clear button.
 	Usage: tab:AddTextbox({ Text = "Email", Placeholder = "you@mail.com", Pattern = "^[%w%.%-_]+@[%w%.%-]+%.%a+$",
 	           Callback = function(text) end })
@@ -3953,7 +5848,7 @@ function Textbox:_validate(commit)
 		if ok and type(p.Validate) == "function" then
 			local ran, res, why = pcall(p.Validate, v)
 			if not ran then
-				warn("[Lumen] Validate error: " .. tostring(res))
+				warn("[Velt] Validate error: " .. tostring(res))
 			elseif res == false then
 				ok, msg = false, (type(why) == "string" and why) or p.ErrorText or "Invalid value"
 			end
@@ -4012,7 +5907,7 @@ end
 -- ===== Components/Toggle =====
 rawget(__comp, "_kids")["Toggle"]._fn = function(script, require)
 --[[
-	Lumen UI :: Components/Toggle
+	Velt UI :: Components/Toggle
 	Usage: local t = tab:AddToggle({ Text = "God mode", Default = false, Callback = function(on) end })
 	       t:Set(true) ; t:Get()
 ]]
@@ -4041,6 +5936,7 @@ function Toggle.new(container, props)
 		Size = UDim2.fromOffset(14, 14), Parent = self.Track,
 	}, { Util.Corner("full") })
 	self.Value = props.Default == true
+	self._accRight = 12 + 40 + 10
 
 	self:_init(container, row, props, "switch")
 	self:_interact(row)
@@ -4061,6 +5957,9 @@ function Toggle:Set(value, silent)
 	if value == self.Value then return end
 	self.Value = value
 	self:_render(true)
+	for _, a in ipairs(self.Attached) do
+		if a.OnParentChanged then a:OnParentChanged(value) end
+	end
 	if not silent then
 		self:_fire(value, tostring(self.Props.Text or "Toggle") .. (value and " on" or " off"))
 	end
@@ -4090,7 +5989,7 @@ end
 -- ===== Components/Widgets =====
 rawget(__comp, "_kids")["Widgets"]._fn = function(script, require)
 --[[
-	Lumen UI :: Components/Widgets
+	Velt UI :: Components/Widgets
 	Small drawn widgets shared by several components (no image assets / special glyphs needed).
 ]]
 local Widgets = {}
@@ -4211,14 +6110,17 @@ end
 -- ===== init =====
 __root._fn = function(script, require)
 --[[
-	Lumen UI 1.0.0 — modular Roblox UI library.
+	Velt UI 2.0.0 — warm, clean, elegant Roblox UI library.
 
-	Install: put the `Lumen` folder in ReplicatedStorage (ModuleScript "Lumen" with children Core/ and Components/).
+	Install: ModuleScript "Velt" (this init file) with folders Core/ and Components/, or load the single-file bundle (Velt.bundle.lua).
 	Use (LocalScript):
-		local Lumen = require(game.ReplicatedStorage.Lumen)
-		local win = Lumen:CreateWindow({ Title = "Hub", Subtitle = "v1" })
-		local tab = win:AddTab({ Name = "Main" })
-		tab:AddButton({ Text = "Hello", Callback = function() Lumen:Notify({ Title = "Hi", Type = "Success" }) end })
+		local Velt = require(game.ReplicatedStorage.Velt)
+		local win = Velt:CreateWindow({ Name = "Hub", Subtitle = "v1", LoadingEnabled = true })
+		win:CreateHomeTab({ Changelog = { { Title = "v1", Date = "today", Description = "First release" } } })
+		local tab = win:CreateTabSection("MAIN"):CreateTab({ Name = "Combat", Columns = 2 })
+		local box = tab:CreateGroupbox({ Name = "Aim", Column = 1 })
+		box:CreateToggle({ Name = "Enabled", Flag = "aim", Callback = function(on) end })
+		Velt:Notify({ Title = "Ready", Type = "Success" })
 ]]
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
@@ -4237,6 +6139,7 @@ local Drag = require(Core.Drag)
 local Tooltip = require(Core.Tooltip)
 local Notifications = require(Core.Notifications)
 local Window = require(Core.Window)
+local Shell = require(Core.Shell)
 
 Util.Config = Config
 
@@ -4257,6 +6160,9 @@ local ctx = {
 		ColorPicker = require(Components.ColorPicker),
 		ProgressBar = require(Components.ProgressBar),
 		TabGroup = require(Components.TabGroup),
+		Bind = require(Components.Bind),
+		LabelRow = Basic.LabelRow,
+		Paragraph = Basic.Paragraph,
 		Label = Basic.Label,
 		Section = Basic.Section,
 		Divider = Basic.Divider,
@@ -4279,6 +6185,7 @@ end
 --- Resolves an icon name registered with RegisterIcons, or returns the raw asset string. @return string
 function ctx:ResolveIcon(icon)
 	if type(icon) == "number" then return "rbxassetid://" .. icon end
+	if type(icon) == "string" and icon:match("^%d+$") then return "rbxassetid://" .. icon end
 	return Config.Icons[icon] or icon or ""
 end
 
@@ -4296,7 +6203,7 @@ function ctx:GetScreenGui()
 	end
 	local parent = self.GuiParent or Players.LocalPlayer:WaitForChild("PlayerGui")
 	local gui = Util.Create("ScreenGui", {
-		Name = "LumenUI", ResetOnSpawn = false, IgnoreGuiInset = true, DisplayOrder = Config.DisplayOrder,
+		Name = "VeltUI", ResetOnSpawn = false, IgnoreGuiInset = true, DisplayOrder = Config.DisplayOrder,
 		ZIndexBehavior = Enum.ZIndexBehavior.Sibling, Parent = parent,
 	})
 	self._gui = gui
@@ -4309,7 +6216,7 @@ end
 
 -- public API -----------------------------------------------------------------------------
 local Lumen = {}
-Lumen.Version = "1.0.0"
+Lumen.Version = "2.0.0"
 Lumen.Theme = ctx.Theme
 Lumen.Anim = Animation
 Lumen.Easing = Animation.Easing
@@ -4320,7 +6227,7 @@ local windows = {}
 -- @param overrides table e.g. { Animation = { Enabled = false }, Notification = { Position = "TopRight" } }
 function Lumen:Configure(overrides)
 	if type(overrides) ~= "table" then
-		warn("[Lumen] Configure expects a table")
+		warn("[Velt] Configure expects a table")
 		return self
 	end
 	Util.DeepMerge(Config, overrides)
@@ -4329,13 +6236,24 @@ function Lumen:Configure(overrides)
 	return self
 end
 
---- Creates a window. See Core/Window.lua for all props.
--- @param props table { Title, Subtitle, Icon, Size, Theme, ToggleKey, Resizable, Blur, Shadow, Mount, Adornee, ... }
+--- Creates the Velt window (sections -> tabs -> groupboxes). See Core/Shell.lua.
+-- @param props table { Name, Subtitle, Icon, Size, Theme, ToggleKey, Glass, Blur, LoadingEnabled, LoadingSettings, ConfigFolder, FloatingButton }
 -- @return Window
 function Lumen:CreateWindow(props)
+	local ok, win = xpcall(Shell.new, function(e) return debug.traceback(tostring(e), 2) end, ctx, props)
+	if not ok then
+		error("[Velt] CreateWindow failed: " .. tostring(win), 2)
+	end
+	table.insert(windows, win)
+	return win
+end
+
+--- Creates the simple classic window (flat tabs, Add* API). See Core/Window.lua.
+-- @param props table @return Window
+function Lumen:CreateClassicWindow(props)
 	local ok, win = xpcall(Window.new, function(e) return debug.traceback(tostring(e), 2) end, ctx, props)
 	if not ok then
-		error("[Lumen] CreateWindow failed: " .. tostring(win), 2)
+		error("[Velt] CreateClassicWindow failed: " .. tostring(win), 2)
 	end
 	table.insert(windows, win)
 	return win
@@ -4401,217 +6319,3 @@ end
 
 
 return __require(__root)
-end)()
-
--- ============================================================================================
--- Velt-compatible facade on top of Lumen.
--- Supports exactly the Velt API used by the ENTRENCHED script:
---   Velt:CreateWindow{Name,Logo,ToggleKey,Size,MinSize}
---   Window:AddTab(name) -> Tab:AddSection/AddLabel/AddButton/AddToggle/AddSlider/AddDropdown
---   Window:Notify/SetSize/Toggle/Destroy, Window.Gui, Window.OnVisibility, Window.Flags
--- Not provided: the named-preset panel (profile card). Your script's own Config file still saves all settings.
--- ============================================================================================
-local UserInputService = game:GetService("UserInputService")
-
-local function canParent(target)
-	local ok, result = pcall(function()
-		local g = Instance.new("ScreenGui")
-		g.Parent = target
-		local good = g.Parent == target
-		g:Destroy()
-		return good
-	end)
-	return ok and result
-end
-
-local function pickParent()
-	local getters = {}
-	if gethui then table.insert(getters, function() return gethui() end) end
-	table.insert(getters, function() return game:GetService("CoreGui") end)
-	table.insert(getters, function() return game:GetService("Players").LocalPlayer:WaitForChild("PlayerGui") end)
-	for _, get in ipairs(getters) do
-		local ok, target = pcall(get)
-		if ok and target and canParent(target) then return target end
-	end
-	return nil
-end
-
-local Velt = {}
-
-function Velt:CreateWindow(config)
-	config = config or {}
-
-	local parent = pickParent()
-	if parent then
-		for _, name in ipairs({ "LumenUI", "VeltUI" }) do
-			local old = parent:FindFirstChild(name)
-			if old then pcall(function() old:Destroy() end) end
-		end
-	end
-	Lumen:SetGuiParent(parent)
-
-	Lumen:RegisterTheme("Entrenched", {
-		Background = Color3.fromRGB(14, 15, 12), Surface = Color3.fromRGB(22, 24, 19),
-		SurfaceAlt = Color3.fromRGB(30, 33, 26), Hover = Color3.fromRGB(40, 44, 34),
-		Track = Color3.fromRGB(10, 11, 8), Stroke = Color3.fromRGB(42, 46, 37),
-		Text = Color3.fromRGB(217, 213, 200), TextMuted = Color3.fromRGB(122, 125, 112),
-		Accent = Color3.fromRGB(200, 162, 74), AccentAlt = Color3.fromRGB(224, 186, 94),
-		AccentText = Color3.fromRGB(20, 18, 10), Success = Color3.fromRGB(94, 122, 74),
-		Warning = Color3.fromRGB(224, 186, 94), Danger = Color3.fromRGB(168, 67, 58),
-		TooltipBackground = Color3.fromRGB(40, 44, 34), TooltipText = Color3.fromRGB(217, 213, 200),
-	})
-	Lumen:Configure({
-		Keyboard = { Enabled = false }, -- Tab/arrow navigation would fight with the game's controls
-		Window = { MinSize = config.MinSize or Vector2.new(300, 220) },
-	})
-
-	local logo
-	if config.Logo and isfile and getcustomasset then
-		local ok, has = pcall(isfile, config.Logo)
-		if ok and has then
-			local ok2, asset = pcall(getcustomasset, config.Logo)
-			if ok2 then logo = asset end
-		end
-	end
-
-	local win = Lumen:CreateWindow({
-		Title = config.Name or "Velt",
-		Icon = logo,
-		Size = config.Size,
-		Theme = "Entrenched",
-		ToggleKey = false, -- the script handles its own (rebindable) menu key
-		Blur = false,
-	})
-
-	local Window = { Flags = {}, Gui = win.Holder.Parent }
-
-	-- floating, draggable toggle button (tap = open/close) --------------------------------------------
-	local T = Lumen.Theme
-	local float = Instance.new("TextButton")
-	float.Name = "FloatingToggle"
-	float.Text = logo and "" or "V"
-	float.Font = Enum.Font.GothamBold
-	float.TextSize = 22
-	float.TextColor3 = T:Get("Accent")
-	float.AutoButtonColor = false
-	float.BackgroundColor3 = T:Get("Background")
-	float.BorderSizePixel = 0
-	float.Size = UDim2.fromOffset(50, 50)
-	local cam = workspace.CurrentCamera
-	float.Position = UDim2.fromOffset(16, math.floor((cam and cam.ViewportSize.Y or 720) / 2 - 25))
-	float.ZIndex = 150
-	Instance.new("UICorner", float).CornerRadius = UDim.new(0, 15)
-	local fstroke = Instance.new("UIStroke", float)
-	fstroke.Thickness = 1.5
-	fstroke.Color = T:Get("Accent")
-	if logo then
-		local img = Instance.new("ImageLabel")
-		img.BackgroundTransparency = 1
-		img.Size = UDim2.new(1, -18, 1, -18)
-		img.Position = UDim2.fromOffset(9, 9)
-		img.Image = logo
-		img.ImageColor3 = T:Get("Accent")
-		img.ScaleType = Enum.ScaleType.Fit
-		img.ZIndex = 151
-		img.Parent = float
-	end
-	float.Parent = Window.Gui
-
-	local conns = {}
-	local pressing, moved, startPtr, startAbs = false, false, nil, nil
-	table.insert(conns, float.InputBegan:Connect(function(input)
-		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-			pressing, moved = true, false
-			startPtr = input.Position
-			startAbs = float.AbsolutePosition
-			input.Changed:Connect(function()
-				if input.UserInputState == Enum.UserInputState.End and pressing then
-					pressing = false
-					if not moved then win:Toggle() end
-				end
-			end)
-		end
-	end))
-	table.insert(conns, UserInputService.InputChanged:Connect(function(input)
-		if pressing and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
-			local d = input.Position - startPtr
-			if not moved and d.Magnitude > 8 then moved = true end
-			if moved then
-				local v = (workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize) or Vector2.new(1280, 720)
-				float.Position = UDim2.fromOffset(
-					math.clamp(startAbs.X + d.X, 0, v.X - 50), math.clamp(startAbs.Y + d.Y, 0, v.Y - 50))
-			end
-		end
-	end))
-
-	local function visibility(state)
-		fstroke.Color = state and T:Get("Accent") or T:Get("TextMuted")
-		if Window.OnVisibility then pcall(Window.OnVisibility, state) end
-	end
-	table.insert(conns, win.Opened:Connect(function() visibility(true) end))
-	table.insert(conns, win.Closed:Connect(function() visibility(false) end))
-
-	-- Window API ------------------------------------------------------------------------------------
-	function Window:Toggle() win:Toggle() end
-	function Window:SetSize(w, h) win:SetSize(Vector2.new(w, h)) end
-	function Window:Notify(o)
-		o = o or {}
-		Lumen:Notify({ Title = o.Title or config.Name or "Notice", Content = o.Content or "", Duration = o.Duration or 4, Type = "Info" })
-	end
-	function Window:Destroy()
-		for _, c in ipairs(conns) do pcall(function() c:Disconnect() end) end
-		pcall(function() float:Destroy() end)
-		pcall(function() win:Destroy() end)
-		pcall(function() Lumen:Destroy() end)
-	end
-
-	local function run(fn, ...)
-		if fn then task.spawn(fn, ...) end
-	end
-
-	function Window:AddTab(tabName)
-		local tab = win:AddTab({ Name = tostring(tabName) })
-		local Tab = {}
-
-		function Tab:AddSection(text) tab:AddSection(text) end
-
-		function Tab:AddLabel(text)
-			local l = tab:AddLabel({ Text = tostring(text), Muted = true })
-			return { Set = function(_, t) l:SetText(t) end }
-		end
-
-		function Tab:AddButton(o)
-			tab:AddButton({ Text = o.Name or "Button", Style = "Ghost", Callback = function() run(o.Callback) end })
-		end
-
-		function Tab:AddToggle(o)
-			local el = tab:AddToggle({ Text = o.Name or "Toggle", Default = o.Default == true,
-				Callback = function(v) run(o.Callback, v) end })
-			local api = { Set = function(_, v) el:Set(v == true) end, Get = function() return el:Get() end }
-			if o.Flag then Window.Flags[o.Flag] = api end
-			return api
-		end
-
-		function Tab:AddSlider(o)
-			local el = tab:AddSlider({ Text = o.Name or "Slider", Min = o.Min or 0, Max = o.Max or 100,
-				Default = o.Default, Step = o.Step or 1, Callback = function(v) run(o.Callback, v) end })
-			local api = { Set = function(_, v) if type(v) == "number" then el:Set(v) end end, Get = function() return el:Get() end }
-			if o.Flag then Window.Flags[o.Flag] = api end
-			return api
-		end
-
-		function Tab:AddDropdown(o)
-			local el = tab:AddDropdown({ Text = o.Name or "Dropdown", Options = o.Options or {}, Default = o.Default,
-				Callback = function(v) run(o.Callback, v) end })
-			local api = { Set = function(_, v) el:Set(v) end, Get = function() return el:Get() end }
-			if o.Flag then Window.Flags[o.Flag] = api end
-			return api
-		end
-
-		return Tab
-	end
-
-	return Window
-end
-
-return Velt
