@@ -6,9 +6,7 @@
      ╚████╔╝ ███████╗███████╗██║
       ╚═══╝  ╚══════╝╚══════╝╚═╝
 
-    Velt UI Library v1.0.0
-    Modern · Minimal · Warm
-
+    Velt UI Library v1.1.0
     Usage:
         local Velt = loadstring(game:HttpGet("url"))()
         local Window = Velt:CreateWindow({
@@ -18,9 +16,16 @@
             SaveConfig = true,
             ConfigFolder = "VeltConfig"
         })
-        local Tab = Window:AddTab({ Title = "Main", Icon = "home" })
+        local Tab = Window:AddTab({ Title = "Main" })
         local Section = Tab:AddSection({ Title = "Combat" })
         Section:AddToggle({ Title = "Enabled", Default = false, Flag = "AimbotOn", Callback = function(v) end })
+
+    v1.1 additions
+        - Sage theme (default), floating logo button (tap = open/close, drag = move), close hides
+        - Window fits the phone screen, resize grip, Window:SetSize / :Toggle / .Gui / .OnVisibility
+        - Logo: nil = default Velt logo (downloaded once), false = none, or a file / URL / asset id
+        - Profile card (Roblox headshot) -> Config tab with named presets (SaveConfig = true)
+        - Flat v0 API still works: Window:AddTab("Name"); tab:AddToggle{Name=..}; tab:AddSection("Title")
 ]]
 
 ----------------------------------------------------------------
@@ -51,6 +56,10 @@ Env.writeFile   = (typeof(writefile) == "function" and writefile) or function() 
 Env.makeFolder  = (typeof(makefolder) == "function" and makefolder) or function() end
 Env.isFolder    = (typeof(isfolder) == "function" and isfolder) or function() return false end
 Env.delFile     = (typeof(delfile) == "function" and delfile) or function() end
+Env.listFiles   = (typeof(listfiles) == "function" and listfiles) or function() return {} end
+Env.getAsset    = (typeof(getcustomasset) == "function" and getcustomasset) or (typeof(getsynasset) == "function" and getsynasset) or nil
+Env.canFS       = typeof(writefile) == "function" and typeof(readfile) == "function" and typeof(isfile) == "function"
+                  and typeof(isfolder) == "function" and typeof(makefolder) == "function" and typeof(listfiles) == "function"
 
 local function protectGui(gui)
     if typeof(syn) == "table" and syn.protect_gui then
@@ -258,6 +267,39 @@ end
 -- Theme Engine
 ----------------------------------------------------------------
 local Themes = {
+    Sage = {
+        Background      = Color3.fromRGB(15, 22, 24),
+        Sidebar         = Color3.fromRGB(19, 28, 31),
+        TitleBar        = Color3.fromRGB(19, 28, 31),
+        Card            = Color3.fromRGB(25, 36, 40),
+        CardBorder      = Color3.fromRGB(44, 62, 66),
+        Surface         = Color3.fromRGB(32, 46, 51),
+        SurfaceHover    = Color3.fromRGB(40, 57, 63),
+        Text            = Color3.fromRGB(230, 238, 234),
+        TextDim         = Color3.fromRGB(127, 149, 144),
+        TextDark        = Color3.fromRGB(84, 106, 102),
+        Accent          = Color3.fromRGB(183, 211, 192),
+        AccentHover     = Color3.fromRGB(205, 228, 213),
+        AccentDark      = Color3.fromRGB(96, 124, 108),
+        OnAccent        = Color3.fromRGB(15, 24, 22),
+        ToggleOff       = Color3.fromRGB(38, 54, 59),
+        SliderTrack     = Color3.fromRGB(36, 51, 56),
+        Success         = Color3.fromRGB(52, 211, 153),
+        Warning         = Color3.fromRGB(240, 190, 90),
+        Error           = Color3.fromRGB(240, 92, 112),
+        Info            = Color3.fromRGB(129, 140, 248),
+        Shadow          = Color3.fromRGB(0, 0, 0),
+        AccentGradient  = ColorSequence.new({
+            ColorSequenceKeypoint.new(0, Color3.fromRGB(190, 218, 199)),
+            ColorSequenceKeypoint.new(1, Color3.fromRGB(150, 184, 164))
+        }),
+        CornerRadius    = UDim.new(0, 8),
+        CornerSmall     = UDim.new(0, 6),
+        Font            = Enum.Font.GothamMedium,
+        FontBold        = Enum.Font.GothamBold,
+        FontLight       = Enum.Font.Gotham,
+    },
+
     Obsidian = {
         Background      = Color3.fromRGB(10, 10, 14),
         Sidebar         = Color3.fromRGB(14, 14, 18),
@@ -517,19 +559,10 @@ end
 ----------------------------------------------------------------
 -- Icons (built-in simple text icons)
 ----------------------------------------------------------------
-local Icons = {
-    home     = "⌂", combat  = "⚔", player  = "☻", misc  = "✦",
-    visual   = "◉", world   = "⊕", config  = "⚙", info  = "ℹ",
-    close    = "✕", minimize = "—", maximize = "□",
-    check    = "✓", arrow   = "›", search  = "⌕", star  = "★",
-    heart    = "♥", shield  = "⛨", bolt    = "⚡", gear  = "⚙",
-    eye      = "◉", lock    = "⊘", key     = "⚷", flag  = "⚑",
-    swords   = "⚔", target  = "◎", speed   = "»", moon  = "☾",
-    sun      = "☼", code    = "<>", folder  = "📁", file  = "📄",
-}
-
-local function getIcon(name)
-    return Icons[name] or (type(name) == "string" and #name <= 2 and name) or "•"
+local function getIcon(name, title)
+    if type(name) == "string" and name ~= "" and #name <= 2 then return name end
+    local t = tostring(title or "?")
+    return t:sub(1, 1):upper()
 end
 
 ----------------------------------------------------------------
@@ -650,61 +683,212 @@ end
 ----------------------------------------------------------------
 local ConfigSystem = {}
 
-function ConfigSystem.new(folder, name)
-    local self = { folder = folder, name = name, flags = {}, data = {} }
+-- Autosave file:  <folder>/<name>.json         (last state, restored on next launch)
+-- Named presets:  <folder>/presets/<name>.json (explicit Save / Load / Delete)
+-- Toggles are NOT switched back on at launch unless RestoreToggles = true (safer for farm/aim features);
+-- loading a preset always applies everything, toggles included.
+function ConfigSystem.new(folder, name, opts)
+    opts = opts or {}
+    local self = {
+        folder = folder, name = name, flags = {}, data = {}, restored = {},
+        loading = false, restoreToggles = opts.restoreToggles == true, autosave = opts.autosave ~= false,
+        memory = {}, _token = 0,
+    }
+    local canFS = Env.canFS
+
+    local function mainPath() return folder .. "/" .. name .. ".json" end
+    local function presetDir() return folder .. "/presets" end
+    local function presetPath(n) return presetDir() .. "/" .. n .. ".json" end
+    local function clean(n)
+        n = tostring(n or ""):gsub("[^%w _%-]", "")
+        n = n:gsub("^%s+", ""):gsub("%s+$", "")
+        return n
+    end
+    local function ensure()
+        if not Env.isFolder(folder) then pcall(Env.makeFolder, folder) end
+        if not Env.isFolder(presetDir()) then pcall(Env.makeFolder, presetDir()) end
+    end
+    local function writeJson(path, data)
+        local ok, json = pcall(HttpService.JSONEncode, HttpService, data)
+        if not ok then return false end
+        return (pcall(Env.writeFile, path, json))
+    end
+    local function readJson(path)
+        if not Env.isFile(path) then return nil end
+        local ok, raw = pcall(Env.readFile, path)
+        if not ok or type(raw) ~= "string" or raw == "" then return nil end
+        local ok2, data = pcall(HttpService.JSONDecode, HttpService, raw)
+        if ok2 and type(data) == "table" then return data end
+        return nil
+    end
+
+    function self:Collect()
+        local out = {}
+        for flag, f in pairs(self.flags) do
+            local ok, v = pcall(f.get)
+            if ok and v ~= nil then out[flag] = v end
+        end
+        return out
+    end
 
     function self:Save()
-        if not Env.isExploit then return end
-        local path = self.folder .. "/" .. self.name .. ".json"
-        if not Env.isFolder(self.folder) then
-            Env.makeFolder(self.folder)
-        end
-        local saveData = {}
-        for flag, getFn in pairs(self.flags) do
-            local ok, val = pcall(getFn)
-            if ok then
-                if typeof(val) == "Color3" then
-                    saveData[flag] = { _type = "Color3", r = val.R, g = val.G, b = val.B }
-                elseif typeof(val) == "EnumItem" then
-                    saveData[flag] = { _type = "Enum", val = tostring(val) }
-                else
-                    saveData[flag] = val
-                end
-            end
-        end
-        local ok, json = pcall(HttpService.JSONEncode, HttpService, saveData)
-        if ok then
-            pcall(Env.writeFile, path, json)
-        end
+        if not canFS or not self.autosave then return false end
+        ensure()
+        return writeJson(mainPath(), self:Collect())
     end
 
     function self:Load()
-        if not Env.isExploit then return {} end
-        local path = self.folder .. "/" .. self.name .. ".json"
-        if not Env.isFile(path) then return {} end
-        local ok, raw = pcall(Env.readFile, path)
-        if not ok then return {} end
-        local ok2, data = pcall(HttpService.JSONDecode, HttpService, raw)
-        if not ok2 then return {} end
-        -- decode special types
-        for k, v in pairs(data) do
-            if type(v) == "table" and v._type == "Color3" then
-                data[k] = Color3.new(v.r, v.g, v.b)
+        self.data = (canFS and self.autosave and readJson(mainPath())) or {}
+        return self.data
+    end
+
+    -- apply a table of flag -> value (callbacks fire so the script's own state follows the UI)
+    function self:Apply(data)
+        self.loading = true
+        for flag, v in pairs(data) do
+            local f = self.flags[flag]
+            if f then pcall(f.set, v, true) end
+        end
+        self.loading = false
+        self:Dirty()
+    end
+
+    function self:RegisterFlag(flag, signal, getFn, setFn, kind)
+        self.flags[flag] = { get = getFn, set = setFn, kind = kind }
+        if signal then signal:Connect(function() self:Dirty() end) end
+        -- restore once per flag (dynamic rebuilds must not re-apply stale data)
+        if not self.restored[flag] then
+            self.restored[flag] = true
+            local v = self.data[flag]
+            if v ~= nil and (kind ~= "toggle" or self.restoreToggles) then
+                self.loading = true
+                pcall(setFn, v, true)
+                self.loading = false
             end
         end
-        self.data = data
-        return data
     end
 
-    function self:RegisterFlag(flag, getFn, setFn)
-        self.flags[flag] = getFn
-        -- apply loaded value
-        if self.data[flag] ~= nil then
-            pcall(setFn, self.data[flag])
+    function self:Dirty()
+        if self.loading or not canFS or not self.autosave then return end
+        self._token = self._token + 1
+        local token = self._token
+        task.delay(1.2, function()
+            if token == self._token then self:Save() end
+        end)
+    end
+
+    function self:SavePreset(n)
+        n = clean(n)
+        if n == "" then return false end
+        local data = self:Collect()
+        if canFS then
+            ensure()
+            return writeJson(presetPath(n), data)
+        end
+        self.memory[n] = data
+        return true
+    end
+
+    function self:LoadPreset(n)
+        n = clean(n)
+        local data = canFS and readJson(presetPath(n)) or self.memory[n]
+        if type(data) ~= "table" then return false end
+        self:Apply(data)
+        return true
+    end
+
+    function self:DeletePreset(n)
+        n = clean(n)
+        if canFS then pcall(Env.delFile, presetPath(n)) else self.memory[n] = nil end
+    end
+
+    function self:ListPresets()
+        local names = {}
+        if canFS then
+            local ok, files = pcall(Env.listFiles, presetDir())
+            if ok and type(files) == "table" then
+                for _, p in ipairs(files) do
+                    local n = tostring(p):match("([^/\\]+)%.json$")
+                    if n then names[#names + 1] = n end
+                end
+            end
+        else
+            for n in pairs(self.memory) do names[#names + 1] = n end
+        end
+        table.sort(names, function(a, b) return a:lower() < b:lower() end)
+        return names
+    end
+
+    self.CleanName = clean
+    return self
+end
+
+----------------------------------------------------------------
+-- Image / logo resolution
+--   Logo = nil      -> default Velt logo (downloaded once from the Velt asset repo)
+--   Logo = false    -> no logo
+--   Logo = "file"   -> file in the executor workspace
+--   Logo = "https://..." / rbxassetid / number
+----------------------------------------------------------------
+local DEFAULT_LOGO_URL  = "https://raw.githubusercontent.com/erszxu-hmm/velt-assets/main/velt_logo.png"
+local DEFAULT_LOGO_FILE = "velt_logo.png"
+
+local function pngValid(file)
+    local ok, data = pcall(Env.readFile, file)
+    return ok and type(data) == "string" and data:sub(2, 4) == "PNG"
+end
+
+local function resolveImage(src)
+    if src == false then return nil end
+    if src == nil then src = DEFAULT_LOGO_URL end
+    if type(src) == "number" then return "rbxassetid://" .. src end
+    if type(src) ~= "string" or src == "" then return nil end
+    if src:find("^rbxassetid://") or src:find("^rbxthumb://") or src:find("^rbxasset://") then return src end
+
+    local file = src
+    if src:find("^https?://") then
+        file = (src == DEFAULT_LOGO_URL) and DEFAULT_LOGO_FILE or ("velt_" .. (src:match("([^/]+)$") or "image.png"))
+        if Env.canFS and (not Env.isFile(file) or not pngValid(file)) then
+            pcall(function()
+                local data = game:HttpGet(src)
+                if type(data) == "string" and data:sub(2, 4) == "PNG" then Env.writeFile(file, data) end
+            end)
         end
     end
+    if Env.isFile(file) and Env.getAsset then
+        local ok, asset = pcall(Env.getAsset, file)
+        if ok and asset and asset ~= "" then return asset end
+    end
+    return nil
+end
 
-    return self
+-- chevron drawn from two bars (font independent); rotate the returned frame 180 to flip it
+local function drawChevron(parent, cx, cy, colorKey, z)
+    local holder = Util.create("Frame", {
+        Parent = parent,
+        BackgroundTransparency = 1,
+        Size = UDim2.fromOffset(16, 16),
+        Position = UDim2.new(1, cx, 0.5, cy),
+        AnchorPoint = Vector2.new(0.5, 0.5),
+        ZIndex = z or 22,
+    })
+    local function bar(x, rot)
+        local f = Util.create("Frame", {
+            Parent = holder,
+            Size = UDim2.fromOffset(9, 2),
+            Position = UDim2.fromOffset(x, 8),
+            AnchorPoint = Vector2.new(0.5, 0.5),
+            Rotation = rot,
+            BackgroundColor3 = ThemeEngine._current[colorKey],
+            BorderSizePixel = 0,
+            ZIndex = z or 22,
+        })
+        Util.create("UICorner", { CornerRadius = UDim.new(1, 0), Parent = f })
+        ThemeEngine:Bind(f, "BackgroundColor3", colorKey)
+    end
+    bar(5, 45)
+    bar(11, -45)
+    return holder
 end
 
 ----------------------------------------------------------------
@@ -712,7 +896,7 @@ end
 ----------------------------------------------------------------
 local Velt = {}
 Velt.__index = Velt
-Velt.Version = "1.0.0"
+Velt.Version = "1.1.0"
 Velt.Themes = Themes
 Velt.ThemeEngine = ThemeEngine
 
@@ -726,26 +910,70 @@ end
 
 function Velt:CreateWindow(config)
     config = config or {}
-    local windowTitle    = config.Title or "Velt"
-    local themeName      = config.Theme or "Obsidian"
-    local minimizeKey    = config.MinimizeKey or Enum.KeyCode.RightShift
-    local saveConfig     = config.SaveConfig or false
-    local configFolder   = config.ConfigFolder or "VeltConfig"
-    local windowSize     = config.Size or UDim2.new(0, 580, 0, 420)
-    local windowMaid     = Maid.new()
+    local windowTitle   = tostring(config.Title or config.Name or "Velt")
+    local themeName     = config.Theme or "Sage"
+    local toggleKey     = config.ToggleKey or config.MinimizeKey or Enum.KeyCode.RightShift
+    local saveConfig    = config.SaveConfig or false
+    local configFolder  = config.ConfigFolder or "VeltConfig"
+    local baseSize      = config.Size or UDim2.new(0, 580, 0, 420)
+    local minSize       = config.MinSize or Vector2.new(300, 220)
+    local closeDestroys = (config.CloseAction == "Destroy")
+    local windowMaid    = Maid.new()
 
-    -- apply theme
+    if type(themeName) == "string" and not Themes[themeName] then themeName = "Sage" end
     ThemeEngine:Apply(themeName, false)
     local theme = ThemeEngine._current
+    local function T() return ThemeEngine._current or theme end
 
-    -- config system
+    -- config system (autosave + named presets)
     local cfgSys
     if saveConfig then
-        cfgSys = ConfigSystem.new(configFolder, windowTitle:gsub("[^%w]", "_"))
+        cfgSys = ConfigSystem.new(configFolder, (windowTitle:gsub("[^%w]", "_")),
+            { restoreToggles = config.RestoreToggles == true, autosave = config.Autosave ~= false })
         cfgSys:Load()
     end
 
-    -- Screen GUI
+    -- leftovers from the older library
+    pcall(function()
+        local old = Env.getHui():FindFirstChild("VeltUI")
+        if old then old:Destroy() end
+    end)
+
+    ----------------------------------------------------------------
+    -- Viewport / size helpers (phone friendly)
+    ----------------------------------------------------------------
+    local function viewport()
+        local cam = workspace.CurrentCamera
+        local v = cam and cam.ViewportSize or Vector2.new(1280, 720)
+        if v.X < 50 or v.Y < 50 then v = Vector2.new(1280, 720) end
+        return v
+    end
+
+    local function clampSize(w, h)
+        local v = viewport()
+        local maxW, maxH = math.max(200, v.X - 16), math.max(160, v.Y - 16)
+        local minW, minH = math.min(minSize.X, maxW), math.min(minSize.Y, maxH)
+        return math.clamp(w, minW, maxW), math.clamp(h, minH, maxH)
+    end
+
+    local v0 = viewport()
+    local curW, curH = clampSize(
+        baseSize.X.Offset + baseSize.X.Scale * v0.X,
+        baseSize.Y.Offset + baseSize.Y.Scale * v0.Y)
+    local posX = math.floor(v0.X / 2 - curW / 2)
+    local posY = math.floor(v0.Y / 2 - curH / 2)
+
+    local function clampPos(x, y)
+        local v = viewport()
+        return math.clamp(x, -(curW - 90), v.X - 90), math.clamp(y, 0, v.Y - 40)
+    end
+
+    -- logo (default comes from the Velt asset repo; false disables it)
+    local logoImage = resolveImage(config.Logo)
+
+    ----------------------------------------------------------------
+    -- Screen GUI + main frame
+    ----------------------------------------------------------------
     local screenGui = Util.create("ScreenGui", {
         Name = "Velt_" .. Util.uuid(),
         DisplayOrder = 100,
@@ -757,36 +985,21 @@ function Velt:CreateWindow(config)
     windowMaid:Add(screenGui)
     ensureNotifHolder(screenGui)
 
-    -- Main window frame
     local mainFrame = Util.create("Frame", {
         Name = "Main",
         Parent = screenGui,
         BackgroundColor3 = theme.Background,
-        Size = windowSize,
-        Position = UDim2.new(0.5, 0, 0.5, 0),
-        AnchorPoint = Vector2.new(0.5, 0.5),
+        Size = UDim2.fromOffset(curW, curH),
+        Position = UDim2.fromOffset(posX, posY),
+        AnchorPoint = Vector2.new(0, 0),
         ClipsDescendants = true,
         Active = true,
     })
     ThemeEngine:Bind(mainFrame, "BackgroundColor3", "Background")
     Util.create("UICorner", { CornerRadius = UDim.new(0, 10), Parent = mainFrame })
+    Util.create("UIStroke", { Color = theme.CardBorder, Thickness = 1, Transparency = 0.3, Parent = mainFrame })
 
-    -- Shadow
-    local shadow = Util.create("ImageLabel", {
-        Name = "Shadow",
-        Parent = mainFrame,
-        BackgroundTransparency = 1,
-        Position = UDim2.new(0, -15, 0, -15),
-        Size = UDim2.new(1, 30, 1, 30),
-        ZIndex = -1,
-        Image = "rbxassetid://5554236805",
-        ImageColor3 = Color3.new(0, 0, 0),
-        ImageTransparency = 0.6,
-        ScaleType = Enum.ScaleType.Slice,
-        SliceCenter = Rect.new(23, 23, 277, 277),
-    })
-
-    -- Title Bar
+    -- Title bar
     local titleBar = Util.create("Frame", {
         Name = "TitleBar",
         Parent = mainFrame,
@@ -797,8 +1010,7 @@ function Velt:CreateWindow(config)
     })
     ThemeEngine:Bind(titleBar, "BackgroundColor3", "TitleBar")
     Util.create("UICorner", { CornerRadius = UDim.new(0, 10), Parent = titleBar })
-    -- square off bottom corners
-    Util.create("Frame", {
+    local tbFill = Util.create("Frame", {
         Parent = titleBar,
         BackgroundColor3 = theme.TitleBar,
         Size = UDim2.new(1, 0, 0, 12),
@@ -806,93 +1018,151 @@ function Velt:CreateWindow(config)
         BorderSizePixel = 0,
         ZIndex = 10,
     })
+    ThemeEngine:Bind(tbFill, "BackgroundColor3", "TitleBar")
 
-    -- Velt logo dot
-    local logoDot = Util.create("Frame", {
-        Parent = titleBar,
-        BackgroundColor3 = theme.Accent,
-        Size = UDim2.new(0, 8, 0, 8),
-        Position = UDim2.new(0, 14, 0.5, 0),
-        AnchorPoint = Vector2.new(0, 0.5),
-        ZIndex = 11,
-    })
-    ThemeEngine:Bind(logoDot, "BackgroundColor3", "Accent")
-    Util.create("UICorner", { CornerRadius = UDim.new(1, 0), Parent = logoDot })
+    -- logo (image) or accent dot
+    if logoImage then
+        local img = Util.create("ImageLabel", {
+            Parent = titleBar,
+            BackgroundTransparency = 1,
+            Size = UDim2.new(0, 22, 0, 22),
+            Position = UDim2.new(0, 10, 0.5, 0),
+            AnchorPoint = Vector2.new(0, 0.5),
+            Image = logoImage,
+            ImageColor3 = theme.Accent,
+            ScaleType = Enum.ScaleType.Fit,
+            ZIndex = 11,
+        })
+        ThemeEngine:Bind(img, "ImageColor3", "Accent")
+    else
+        local dot = Util.create("Frame", {
+            Parent = titleBar,
+            BackgroundColor3 = theme.Accent,
+            Size = UDim2.new(0, 8, 0, 8),
+            Position = UDim2.new(0, 14, 0.5, 0),
+            AnchorPoint = Vector2.new(0, 0.5),
+            ZIndex = 11,
+        })
+        ThemeEngine:Bind(dot, "BackgroundColor3", "Accent")
+        Util.create("UICorner", { CornerRadius = UDim.new(1, 0), Parent = dot })
+    end
 
-    -- Brand text
-    local brandLabel = Util.create("TextLabel", {
-        Parent = titleBar,
-        BackgroundTransparency = 1,
-        Position = UDim2.new(0, 28, 0, 0),
-        Size = UDim2.new(0, 32, 1, 0),
-        Font = Enum.Font.GothamBold,
-        TextColor3 = theme.Accent,
-        TextSize = 12,
-        Text = "velt",
-        TextXAlignment = Enum.TextXAlignment.Left,
-        ZIndex = 11,
-    })
-    ThemeEngine:Bind(brandLabel, "TextColor3", "Accent")
+    local titleX = 40
+    local brandText = config.Brand or "velt"
+    if config.Brand ~= false and windowTitle:lower() ~= tostring(brandText):lower() then
+        local brandLabel = Util.create("TextLabel", {
+            Parent = titleBar,
+            BackgroundTransparency = 1,
+            Position = UDim2.new(0, 38, 0, 0),
+            Size = UDim2.new(0, 32, 1, 0),
+            Font = Enum.Font.GothamBold,
+            TextColor3 = theme.Accent,
+            TextSize = 12,
+            Text = tostring(brandText),
+            TextXAlignment = Enum.TextXAlignment.Left,
+            ZIndex = 11,
+        })
+        ThemeEngine:Bind(brandLabel, "TextColor3", "Accent")
+        local div = Util.create("Frame", {
+            Parent = titleBar,
+            BackgroundColor3 = theme.CardBorder,
+            BackgroundTransparency = 0.5,
+            Position = UDim2.new(0, 76, 0.2, 0),
+            Size = UDim2.new(0, 1, 0.6, 0),
+            BorderSizePixel = 0,
+            ZIndex = 11,
+        })
+        ThemeEngine:Bind(div, "BackgroundColor3", "CardBorder")
+        titleX = 86
+    end
 
-    -- Divider after brand
-    Util.create("Frame", {
-        Parent = titleBar,
-        BackgroundColor3 = theme.CardBorder,
-        BackgroundTransparency = 0.5,
-        Position = UDim2.new(0, 68, 0.2, 0),
-        Size = UDim2.new(0, 1, 0.6, 0),
-        BorderSizePixel = 0,
-        ZIndex = 11,
-    })
-
-    -- Title text
     local titleLabel = Util.create("TextLabel", {
         Parent = titleBar,
         BackgroundTransparency = 1,
-        Position = UDim2.new(0, 78, 0, 0),
-        Size = UDim2.new(1, -180, 1, 0),
-        Font = theme.Font,
-        TextColor3 = theme.TextDim,
+        Position = UDim2.new(0, titleX, 0, 0),
+        Size = UDim2.new(1, -(titleX + 84), 1, 0),
+        Font = theme.FontBold,
+        TextColor3 = theme.Text,
         TextSize = 13,
         Text = windowTitle,
         TextXAlignment = Enum.TextXAlignment.Left,
         TextTruncate = Enum.TextTruncate.AtEnd,
         ZIndex = 11,
     })
-    ThemeEngine:Bind(titleLabel, "TextColor3", "TextDim")
+    ThemeEngine:Bind(titleLabel, "TextColor3", "Text")
 
-    -- Window controls (minimize, close)
-    local function makeControlBtn(icon, offsetX, color, hoverColor)
+    -- window controls (glyphs are drawn from frames: font independent)
+    local function makeControlBtn(kind, offsetX, hoverKey)
         local btn = Util.create("TextButton", {
             Parent = titleBar,
             BackgroundColor3 = theme.Surface,
             BackgroundTransparency = 1,
             Position = UDim2.new(1, offsetX, 0.5, 0),
-            Size = UDim2.new(0, 28, 0, 28),
+            Size = UDim2.new(0, 32, 0, 28),
             AnchorPoint = Vector2.new(0.5, 0.5),
-            Font = Enum.Font.GothamBold,
-            TextColor3 = color or theme.TextDim,
-            TextSize = 14,
-            Text = icon,
+            Text = "",
             AutoButtonColor = false,
             ZIndex = 12,
         })
         Util.create("UICorner", { CornerRadius = UDim.new(0, 6), Parent = btn })
+        local bars = {}
+        local function bar(rot, w)
+            local f = Util.create("Frame", {
+                Parent = btn,
+                Size = UDim2.fromOffset(w, 2),
+                Position = UDim2.new(0.5, 0, 0.5, 0),
+                AnchorPoint = Vector2.new(0.5, 0.5),
+                Rotation = rot,
+                BackgroundColor3 = theme.TextDim,
+                BorderSizePixel = 0,
+                ZIndex = 13,
+            })
+            Util.create("UICorner", { CornerRadius = UDim.new(1, 0), Parent = f })
+            ThemeEngine:Bind(f, "BackgroundColor3", "TextDim")
+            bars[#bars + 1] = f
+        end
+        if kind == "close" then bar(45, 13) bar(-45, 13) else bar(0, 12) end
         btn.MouseEnter:Connect(function()
-            Util.tween(btn, { BackgroundTransparency = 0.5, TextColor3 = hoverColor or theme.Text }, 0.15)
+            Util.tween(btn, { BackgroundTransparency = 0.5 }, 0.15)
+            for _, f in ipairs(bars) do Util.tween(f, { BackgroundColor3 = T()[hoverKey] }, 0.15) end
         end)
         btn.MouseLeave:Connect(function()
-            Util.tween(btn, { BackgroundTransparency = 1, TextColor3 = color or theme.TextDim }, 0.15)
+            Util.tween(btn, { BackgroundTransparency = 1 }, 0.15)
+            for _, f in ipairs(bars) do Util.tween(f, { BackgroundColor3 = T().TextDim }, 0.15) end
         end)
         return btn
     end
 
-    local closeBtn = makeControlBtn("✕", -18, theme.TextDim, theme.Error)
-    local minBtn   = makeControlBtn("—", -50, theme.TextDim, theme.Text)
+    local closeBtn = makeControlBtn("close", -20, "Error")
+    local minBtn   = makeControlBtn("min", -56, "Text")
 
-    makeDraggable(mainFrame, titleBar)
+    -- drag by title bar (kept on-screen)
+    do
+        local dragging, dStart, sX, sY = false, nil, 0, 0
+        titleBar.InputBegan:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.MouseButton1
+                or input.UserInputType == Enum.UserInputType.Touch then
+                dragging = true
+                dStart = input.Position
+                sX, sY = posX, posY
+                input.Changed:Connect(function()
+                    if input.UserInputState == Enum.UserInputState.End then dragging = false end
+                end)
+            end
+        end)
+        windowMaid:Add(UserInput.InputChanged:Connect(function(input)
+            if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement
+                or input.UserInputType == Enum.UserInputType.Touch) then
+                local d = input.Position - dStart
+                posX, posY = clampPos(sX + d.X, sY + d.Y)
+                mainFrame.Position = UDim2.fromOffset(posX, posY)
+            end
+        end))
+    end
 
-    -- Sidebar
+    ----------------------------------------------------------------
+    -- Sidebar / content
+    ----------------------------------------------------------------
     local sidebar = Util.create("Frame", {
         Name = "Sidebar",
         Parent = mainFrame,
@@ -904,8 +1174,7 @@ function Velt:CreateWindow(config)
     })
     ThemeEngine:Bind(sidebar, "BackgroundColor3", "Sidebar")
 
-    -- Sidebar border
-    Util.create("Frame", {
+    local sbLine = Util.create("Frame", {
         Parent = sidebar,
         BackgroundColor3 = theme.CardBorder,
         BackgroundTransparency = 0.6,
@@ -914,14 +1183,15 @@ function Velt:CreateWindow(config)
         BorderSizePixel = 0,
         ZIndex = 6,
     })
+    ThemeEngine:Bind(sbLine, "BackgroundColor3", "CardBorder")
 
-    -- Tab buttons container
+    local showCard = config.ProfileCard ~= false
     local tabContainer = Util.create("ScrollingFrame", {
         Name = "TabList",
         Parent = sidebar,
         BackgroundTransparency = 1,
         Position = UDim2.new(0, 8, 0, 8),
-        Size = UDim2.new(1, -16, 1, -40),
+        Size = UDim2.new(1, -16, 1, showCard and -64 or -16),
         CanvasSize = UDim2.new(0, 0, 0, 0),
         AutomaticCanvasSize = Enum.AutomaticSize.Y,
         ScrollBarThickness = 2,
@@ -936,21 +1206,65 @@ function Velt:CreateWindow(config)
         Padding = UDim.new(0, 2),
     })
 
-    -- Footer label
-    local footer = Util.create("TextLabel", {
-        Parent = sidebar,
-        BackgroundTransparency = 1,
-        Position = UDim2.new(0, 0, 1, -28),
-        Size = UDim2.new(1, 0, 0, 28),
-        Font = Enum.Font.Gotham,
-        TextColor3 = theme.TextDark,
-        TextSize = 10,
-        Text = "velt v" .. Velt.Version,
-        ZIndex = 6,
-    })
-    ThemeEngine:Bind(footer, "TextColor3", "TextDark")
+    -- profile card: Roblox headshot + name
+    local profileBtn
+    if showCard then
+        profileBtn = Util.create("TextButton", {
+            Name = "ProfileCard",
+            Parent = sidebar,
+            BackgroundColor3 = theme.Card,
+            Position = UDim2.new(0, 8, 1, -52),
+            Size = UDim2.new(1, -16, 0, 44),
+            Text = "",
+            AutoButtonColor = false,
+            ZIndex = 7,
+        })
+        ThemeEngine:Bind(profileBtn, "BackgroundColor3", "Card")
+        Util.create("UICorner", { CornerRadius = theme.CornerSmall, Parent = profileBtn })
+        local pStroke = Util.create("UIStroke", { Color = theme.CardBorder, Thickness = 1, Transparency = 0.4, Parent = profileBtn })
+        ThemeEngine:Bind(pStroke, "Color", "CardBorder")
 
-    -- Content area
+        local av = Util.create("ImageLabel", {
+            Parent = profileBtn,
+            BackgroundColor3 = theme.Surface,
+            Position = UDim2.new(0, 7, 0.5, 0),
+            Size = UDim2.new(0, 30, 0, 30),
+            AnchorPoint = Vector2.new(0, 0.5),
+            Image = LocalPlayer and ("rbxthumb://type=AvatarHeadShot&id=" .. LocalPlayer.UserId .. "&w=150&h=150") or "",
+            ZIndex = 8,
+        })
+        ThemeEngine:Bind(av, "BackgroundColor3", "Surface")
+        Util.create("UICorner", { CornerRadius = UDim.new(1, 0), Parent = av })
+
+        local pName = Util.create("TextLabel", {
+            Parent = profileBtn,
+            BackgroundTransparency = 1,
+            Position = UDim2.new(0, 44, 0, 6),
+            Size = UDim2.new(1, -50, 0, 16),
+            Font = theme.FontBold,
+            TextColor3 = theme.Text,
+            TextSize = 12,
+            Text = LocalPlayer and LocalPlayer.DisplayName or "Player",
+            TextXAlignment = Enum.TextXAlignment.Left,
+            TextTruncate = Enum.TextTruncate.AtEnd,
+            ZIndex = 8,
+        })
+        ThemeEngine:Bind(pName, "TextColor3", "Text")
+        local pSub = Util.create("TextLabel", {
+            Parent = profileBtn,
+            BackgroundTransparency = 1,
+            Position = UDim2.new(0, 44, 0, 22),
+            Size = UDim2.new(1, -50, 0, 14),
+            Font = Enum.Font.Gotham,
+            TextColor3 = theme.TextDark,
+            TextSize = 10,
+            Text = cfgSys and "presets" or ("velt v" .. Velt.Version),
+            TextXAlignment = Enum.TextXAlignment.Left,
+            ZIndex = 8,
+        })
+        ThemeEngine:Bind(pSub, "TextColor3", "TextDim")
+    end
+
     local contentArea = Util.create("Frame", {
         Name = "Content",
         Parent = mainFrame,
@@ -961,79 +1275,255 @@ function Velt:CreateWindow(config)
         ZIndex = 5,
     })
 
-    -- Tab management
+    local function applyLayout()
+        local sw = (curW < 470) and 108 or 140
+        sidebar.Size = UDim2.new(0, sw, 1, -38)
+        contentArea.Position = UDim2.new(0, sw, 0, 38)
+        contentArea.Size = UDim2.new(1, -sw, 1, -38)
+    end
+    applyLayout()
+
+    -- resize grip (bottom-right)
+    local grip = Util.create("Frame", {
+        Name = "ResizeGrip",
+        Parent = mainFrame,
+        BackgroundTransparency = 1,
+        Size = UDim2.fromOffset(28, 28),
+        Position = UDim2.new(1, -28, 1, -28),
+        Active = true,
+        ZIndex = 60,
+    })
+    local function gline(len, c)
+        local f = Util.create("Frame", {
+            Parent = grip,
+            Size = UDim2.fromOffset(len, 2),
+            Position = UDim2.fromOffset(c, c),
+            AnchorPoint = Vector2.new(0.5, 0.5),
+            Rotation = -45,
+            BackgroundColor3 = theme.TextDim,
+            BorderSizePixel = 0,
+            ZIndex = 61,
+        })
+        Util.create("UICorner", { CornerRadius = UDim.new(1, 0), Parent = f })
+        ThemeEngine:Bind(f, "BackgroundColor3", "TextDim")
+    end
+    gline(14, 17)
+    gline(7, 22)
+
+    local function applySize(w, h, animate)
+        curW, curH = clampSize(w, h)
+        if animate then
+            Util.tween(mainFrame, { Size = UDim2.fromOffset(curW, curH) }, 0.18)
+        else
+            mainFrame.Size = UDim2.fromOffset(curW, curH)
+        end
+        posX, posY = clampPos(posX, posY)
+        mainFrame.Position = UDim2.fromOffset(posX, posY)
+        applyLayout()
+    end
+
+    do
+        local resizing, rStart, rW, rH = false, nil, 0, 0
+        grip.InputBegan:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.MouseButton1
+                or input.UserInputType == Enum.UserInputType.Touch then
+                resizing = true
+                rStart = input.Position
+                rW, rH = curW, curH
+                input.Changed:Connect(function()
+                    if input.UserInputState == Enum.UserInputState.End then resizing = false end
+                end)
+            end
+        end)
+        windowMaid:Add(UserInput.InputChanged:Connect(function(input)
+            if resizing and (input.UserInputType == Enum.UserInputType.MouseMovement
+                or input.UserInputType == Enum.UserInputType.Touch) then
+                local d = input.Position - rStart
+                applySize(rW + d.X, rH + d.Y, false)
+            end
+        end))
+    end
+
+    ----------------------------------------------------------------
+    -- Tab selection
+    ----------------------------------------------------------------
     local tabs = {}
     local activeTab = nil
 
     local function selectTab(tabObj)
         if activeTab == tabObj then return end
-        -- deselect old
+        local th = T()
         if activeTab then
             Util.tween(activeTab._btn, { BackgroundTransparency = 1 }, 0.2)
             Util.tween(activeTab._indicator, { Size = UDim2.new(0, 3, 0, 0), BackgroundTransparency = 1 }, 0.2)
-            Util.tween(activeTab._icon, { TextColor3 = theme.TextDim }, 0.15)
-            Util.tween(activeTab._label, { TextColor3 = theme.TextDim }, 0.15)
+            Util.tween(activeTab._icon, { TextColor3 = th.TextDim }, 0.15)
+            Util.tween(activeTab._label, { TextColor3 = th.TextDim }, 0.15)
             activeTab._page.Visible = false
         end
-        -- select new
         activeTab = tabObj
         Util.tween(tabObj._btn, { BackgroundTransparency = 0.85 }, 0.2)
         Util.tween(tabObj._indicator, { Size = UDim2.new(0, 3, 0, 18), BackgroundTransparency = 0 }, 0.2)
-        Util.tween(tabObj._icon, { TextColor3 = theme.Accent }, 0.15)
-        Util.tween(tabObj._label, { TextColor3 = theme.Text }, 0.15)
+        Util.tween(tabObj._icon, { TextColor3 = th.Accent }, 0.15)
+        Util.tween(tabObj._label, { TextColor3 = th.Text }, 0.15)
         tabObj._page.Visible = true
     end
 
+    ----------------------------------------------------------------
     -- Window object
+    ----------------------------------------------------------------
     local window = {}
     window._gui = screenGui
+    window.Gui = screenGui
+    window.Main = mainFrame
     window._main = mainFrame
     window._visible = true
     window._tabs = tabs
+    window.Tabs = tabs
+    window.Flags = {}          -- kept for old-API scripts
     window._config = cfgSys
     window._maid = windowMaid
 
-    -- Minimize/Close behavior
-    local function toggleVisibility()
-        window._visible = not window._visible
-        if window._visible then
+    ----------------------------------------------------------------
+    -- Show / hide (close hides, it does not destroy)
+    ----------------------------------------------------------------
+    local function setVisible(state)
+        window._visible = state
+        if window.OnVisibility then pcall(window.OnVisibility, state) end
+        if state then
             mainFrame.Visible = true
-            Util.tween(mainFrame, { Size = windowSize }, 0.3, Enum.EasingStyle.Back)
-            mainFrame.BackgroundTransparency = 0
+            Util.tween(mainFrame, { Size = UDim2.fromOffset(curW, curH) }, 0.28, Enum.EasingStyle.Quint)
         else
-            Util.tween(mainFrame, { Size = UDim2.new(0, windowSize.X.Offset, 0, 0) }, 0.25, Enum.EasingStyle.Quart)
-            task.delay(0.25, function()
+            Util.tween(mainFrame, { Size = UDim2.fromOffset(curW, 0) }, 0.22, Enum.EasingStyle.Quart)
+            task.delay(0.24, function()
                 if not window._visible then mainFrame.Visible = false end
             end)
         end
     end
 
-    minBtn.MouseButton1Click:Connect(toggleVisibility)
-
+    minBtn.MouseButton1Click:Connect(function() setVisible(false) end)
     closeBtn.MouseButton1Click:Connect(function()
-        if cfgSys then cfgSys:Save() end
-        Util.tween(mainFrame, {
-            Size = UDim2.new(0, windowSize.X.Offset, 0, 0),
-            BackgroundTransparency = 1
-        }, 0.3, Enum.EasingStyle.Quart)
-        task.delay(0.35, function()
-            screenGui:Destroy()
-        end)
+        if closeDestroys then window:Destroy() else setVisible(false) end
     end)
 
     windowMaid:Add(UserInput.InputBegan:Connect(function(input, processed)
-        if not processed and input.KeyCode == minimizeKey then
-            toggleVisibility()
+        if not processed and input.KeyCode == toggleKey then
+            setVisible(not window._visible)
         end
     end))
+
+    ----------------------------------------------------------------
+    -- Floating logo button: drag to move, tap to open / close
+    ----------------------------------------------------------------
+    local floatBtn
+    if config.FloatingButton ~= false then
+        local fx, fy = 16, math.floor(v0.Y / 2 - 25)
+        floatBtn = Util.create("Frame", {
+            Name = "FloatingToggle",
+            Parent = screenGui,
+            Size = UDim2.fromOffset(50, 50),
+            Position = UDim2.fromOffset(fx, fy),
+            BackgroundColor3 = theme.Card,
+            BorderSizePixel = 0,
+            Active = true,
+            ZIndex = 90,
+        })
+        ThemeEngine:Bind(floatBtn, "BackgroundColor3", "Card")
+        Util.create("UICorner", { CornerRadius = UDim.new(0, 15), Parent = floatBtn })
+        local floatStroke = Util.create("UIStroke", {
+            Color = theme.Accent, Thickness = 1.5, ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = floatBtn,
+        })
+
+        if logoImage then
+            local li = Util.create("ImageLabel", {
+                Parent = floatBtn,
+                Size = UDim2.new(1, -18, 1, -18),
+                Position = UDim2.fromOffset(9, 9),
+                BackgroundTransparency = 1,
+                Image = logoImage,
+                ImageColor3 = theme.Accent,
+                ScaleType = Enum.ScaleType.Fit,
+                ZIndex = 91,
+            })
+            ThemeEngine:Bind(li, "ImageColor3", "Accent")
+        else
+            local lt = Util.create("TextLabel", {
+                Parent = floatBtn,
+                Size = UDim2.fromScale(1, 1),
+                BackgroundTransparency = 1,
+                Text = "V",
+                Font = theme.FontBold,
+                TextSize = 22,
+                TextColor3 = theme.Accent,
+                ZIndex = 91,
+            })
+            ThemeEngine:Bind(lt, "TextColor3", "Accent")
+        end
+
+        window.OnVisibility = function(state)
+            local th = T()
+            Util.tween(floatStroke, { Color = state and th.Accent or th.AccentDark }, 0.2)
+        end
+
+        local pressing, moved, fStart, sx, sy = false, false, nil, 0, 0
+        floatBtn.InputBegan:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.MouseButton1
+                or input.UserInputType == Enum.UserInputType.Touch then
+                pressing, moved = true, false
+                fStart = input.Position
+                sx, sy = fx, fy
+                Util.tween(floatBtn, { BackgroundColor3 = T().Surface }, 0.08)
+                input.Changed:Connect(function()
+                    if input.UserInputState == Enum.UserInputState.End and pressing then
+                        pressing = false
+                        Util.tween(floatBtn, { BackgroundColor3 = T().Card }, 0.12)
+                        if not moved then setVisible(not window._visible) end -- pure tap, not a drag
+                    end
+                end)
+            end
+        end)
+        windowMaid:Add(UserInput.InputChanged:Connect(function(input)
+            if pressing and (input.UserInputType == Enum.UserInputType.MouseMovement
+                or input.UserInputType == Enum.UserInputType.Touch) then
+                local d = input.Position - fStart
+                if not moved and d.Magnitude > 8 then moved = true end
+                if moved then
+                    local v = viewport()
+                    fx = math.clamp(sx + d.X, 0, v.X - 50)
+                    fy = math.clamp(sy + d.Y, 0, v.Y - 50)
+                    floatBtn.Position = UDim2.fromOffset(fx, fy)
+                end
+            end
+        end))
+        window._floatReclamp = function()
+            local v = viewport()
+            fx = math.clamp(fx, 0, v.X - 50)
+            fy = math.clamp(fy, 0, v.Y - 50)
+            floatBtn.Position = UDim2.fromOffset(fx, fy)
+        end
+    else
+        window.OnVisibility = function() end
+    end
+    window.OnVisibility(true)
+
+    -- keep everything on screen when the viewport changes (rotation, resize)
+    pcall(function()
+        local cam = workspace.CurrentCamera
+        if cam then
+            windowMaid:Add(cam:GetPropertyChangedSignal("ViewportSize"):Connect(function()
+                applySize(curW, curH, false)
+                if window._floatReclamp then window._floatReclamp() end
+            end))
+        end
+    end)
 
     ----------------------------------------------------------------
     -- AddTab
     ----------------------------------------------------------------
     function window:AddTab(tabConfig)
+        if type(tabConfig) == "string" then tabConfig = { Title = tabConfig } end
         tabConfig = tabConfig or {}
-        local tabTitle = tabConfig.Title or "Tab"
-        local tabIcon  = tabConfig.Icon or "•"
+        local tabTitle = tostring(tabConfig.Title or tabConfig.Name or "Tab")
+        local tabIcon  = tabConfig.Icon
         local order    = #tabs + 1
 
         -- Tab button
@@ -1074,7 +1564,7 @@ function Velt:CreateWindow(config)
             Font = Enum.Font.GothamBold,
             TextColor3 = theme.TextDim,
             TextSize = 14,
-            Text = getIcon(tabIcon),
+            Text = getIcon(tabIcon, tabTitle),
             ZIndex = 8,
         })
 
@@ -1150,6 +1640,7 @@ function Velt:CreateWindow(config)
         -- AddSection
         ----------------------------------------------------------------
         function tabObj:AddSection(secConfig)
+            if type(secConfig) == "string" then secConfig = { Title = secConfig } end
             secConfig = secConfig or {}
             local secTitle = secConfig.Title or "Section"
             local secOrder = #self._sections + 1
@@ -1206,6 +1697,7 @@ function Velt:CreateWindow(config)
             section._elementCount = 0
 
             self._sections[secOrder] = section
+            self._cur = section
 
             ----------------------------------------------------------------
             -- AddToggle
@@ -1297,7 +1789,7 @@ function Velt:CreateWindow(config)
 
                 -- config flag
                 if cfg.Flag and cfgSys then
-                    cfgSys:RegisterFlag(cfg.Flag, function() return value end, function(v) updateToggle(v, true) end)
+                    cfgSys:RegisterFlag(cfg.Flag, changed, function() return value end, function(v, fire) updateToggle(v, not fire) end, "toggle")
                 end
 
                 -- theme update
@@ -1454,7 +1946,7 @@ function Velt:CreateWindow(config)
                 slider.OnChanged = changed
 
                 if cfg.Flag and cfgSys then
-                    cfgSys:RegisterFlag(cfg.Flag, function() return value end, function(v) slider:Set(v) end)
+                    cfgSys:RegisterFlag(cfg.Flag, changed, function() return value end, function(v, fire) if type(v) == "number" then slider:Set(v); if fire then pcall(callback, value) end end end)
                 end
 
                 return slider
@@ -1481,6 +1973,7 @@ function Velt:CreateWindow(config)
                     ZIndex = 8,
                 })
                 ThemeEngine:Bind(btn, "BackgroundColor3", "Accent")
+                ThemeEngine:Bind(btn, "TextColor3", "OnAccent", function(v) return v or Color3.new(1, 1, 1) end)
                 Util.create("UICorner", { CornerRadius = theme.CornerSmall, Parent = btn })
 
                 -- Gradient overlay
@@ -1580,7 +2073,7 @@ function Velt:CreateWindow(config)
                 input.OnChanged = changed
 
                 if cfg.Flag and cfgSys then
-                    cfgSys:RegisterFlag(cfg.Flag, function() return value end, function(v) input:Set(v) end)
+                    cfgSys:RegisterFlag(cfg.Flag, changed, function() return value end, function(v, fire) input:Set(v); if fire then pcall(callback, value) end end)
                 end
 
                 return input
@@ -1639,18 +2132,12 @@ function Velt:CreateWindow(config)
                 Util.create("UIStroke", { Color = theme.CardBorder, Thickness = 1, Transparency = 0.5, Parent = dropBtn })
                 Util.create("UIPadding", { PaddingLeft = UDim.new(0, 8), PaddingRight = UDim.new(0, 8), Parent = dropBtn })
 
-                local arrowLabel = Util.create("TextLabel", {
-                    Parent = dropBtn,
-                    BackgroundTransparency = 1,
-                    Position = UDim2.new(1, -4, 0, 0),
-                    Size = UDim2.new(0, 16, 1, 0),
-                    AnchorPoint = Vector2.new(1, 0),
-                    Font = Enum.Font.GothamBold,
-                    TextColor3 = theme.TextDim,
-                    TextSize = 10,
-                    Text = "▼",
-                    ZIndex = 22,
-                })
+                local arrowHolder = drawChevron(dropBtn, -10, 0, "TextDim", 22)
+                local arrowLabel = {}
+                local function setArrow(open, h)
+                    Util.tween(arrowHolder, { Rotation = open and 180 or 0 }, 0.18)
+                    row.Size = UDim2.new(1, 0, 0, open and (56 + (h or 0)) or 50)
+                end
 
                 -- Dropdown list
                 local dropList = Util.create("Frame", {
@@ -1780,7 +2267,7 @@ function Velt:CreateWindow(config)
                                 isOpen = false
                                 Util.tween(dropList, { Size = UDim2.new(1, 0, 0, 0) }, 0.2)
                                 task.delay(0.2, function() dropList.Visible = false end)
-                                arrowLabel.Text = "▼"
+                                setArrow(false)
                             end
                             dropBtn.Text = getDisplayText()
                             pcall(callback, value)
@@ -1809,11 +2296,11 @@ function Velt:CreateWindow(config)
                         local itemCount = math.min(#options, 6)
                         local h = itemCount * 28 + 8 + (searchable and 30 or 0)
                         Util.tween(dropList, { Size = UDim2.new(1, 0, 0, h) }, 0.2, Enum.EasingStyle.Quart)
-                        arrowLabel.Text = "▲"
+                        setArrow(true, h)
                     else
                         Util.tween(dropList, { Size = UDim2.new(1, 0, 0, 0) }, 0.15)
                         task.delay(0.15, function() dropList.Visible = false end)
-                        arrowLabel.Text = "▼"
+                        setArrow(false)
                     end
                 end)
 
@@ -1842,7 +2329,7 @@ function Velt:CreateWindow(config)
                 dropdown.OnChanged = changed
 
                 if cfg.Flag and cfgSys then
-                    cfgSys:RegisterFlag(cfg.Flag, function() return value end, function(v) dropdown:Set(v) end)
+                    cfgSys:RegisterFlag(cfg.Flag, changed, function() return value end, function(v, fire) dropdown:Set(v); if fire then pcall(callback, value) end end)
                 end
 
                 return dropdown
@@ -1928,7 +2415,7 @@ function Velt:CreateWindow(config)
                 keybind.OnChanged = changed
 
                 if cfg.Flag and cfgSys then
-                    cfgSys:RegisterFlag(cfg.Flag,
+                    cfgSys:RegisterFlag(cfg.Flag, changed,
                         function() return value.Name end,
                         function(v)
                             local ok, kc = pcall(function() return Enum.KeyCode[v] end)
@@ -2164,7 +2651,7 @@ function Velt:CreateWindow(config)
                 colorPicker.OnChanged = changed
 
                 if cfg.Flag and cfgSys then
-                    cfgSys:RegisterFlag(cfg.Flag,
+                    cfgSys:RegisterFlag(cfg.Flag, changed,
                         function() return { value.R, value.G, value.B } end,
                         function(t) if type(t) == "table" then colorPicker:Set(Color3.new(t[1], t[2], t[3])) end end
                     )
@@ -2245,6 +2732,34 @@ function Velt:CreateWindow(config)
                 local obj = {}
                 function obj:SetTitle(t) titleL.Text = t end
                 function obj:SetContent(t) contentL.Text = t end
+                return obj
+            end
+
+            ----------------------------------------------------------------
+            -- AddDivider
+            ----------------------------------------------------------------
+            function section:AddText(cfg)
+                cfg = cfg or {}
+                section._elementCount = section._elementCount + 1
+                local label = Util.create("TextLabel", {
+                    Parent = sectionFrame,
+                    BackgroundTransparency = 1,
+                    Size = UDim2.new(1, 0, 0, 0),
+                    AutomaticSize = Enum.AutomaticSize.Y,
+                    Font = theme.FontLight,
+                    TextColor3 = theme.TextDim,
+                    TextSize = 12,
+                    Text = tostring(cfg.Text or cfg.Title or ""),
+                    TextXAlignment = Enum.TextXAlignment.Left,
+                    TextWrapped = true,
+                    LayoutOrder = section._elementCount,
+                    ZIndex = 8,
+                })
+                ThemeEngine:Bind(label, "TextColor3", "TextDim")
+                local obj = {}
+                function obj:Set(t) label.Text = tostring(t) end
+                function obj:SetText(t) label.Text = tostring(t) end
+                function obj:Get() return label.Text end
                 return obj
             end
 
@@ -2340,6 +2855,65 @@ function Velt:CreateWindow(config)
             return section
         end
 
+        ----------------------------------------------------------------
+        -- Tab helpers + flat (v0 style) API
+        --   tab:AddToggle{Name=..}  -> goes into the tab's current section
+        ----------------------------------------------------------------
+        tabObj.Page = page
+        function tabObj:Select() selectTab(tabObj) end
+
+        function tabObj:Clear()
+            for _, c in ipairs(page:GetChildren()) do
+                if c:IsA("GuiObject") then c:Destroy() end
+            end
+            self._sections = {}
+            self._cur = nil
+        end
+
+        local function norm(o)
+            if type(o) == "string" then o = { Title = o } end
+            local n = {}
+            for k, v in pairs(o or {}) do n[k] = v end
+            if n.Title == nil then n.Title = n.Name end
+            if n.Increment == nil then n.Increment = n.Step end
+            return n
+        end
+
+        local function curSection(self)
+            if not self._cur then self:AddSection({ Title = "" }) end
+            return self._cur
+        end
+
+        local flagged = { AddToggle = true, AddSlider = true, AddDropdown = true,
+                          AddInput = true, AddKeybind = true, AddColorPicker = true }
+        for _, m in ipairs({ "AddToggle", "AddSlider", "AddDropdown", "AddButton", "AddInput",
+                             "AddKeybind", "AddColorPicker", "AddParagraph", "AddProgressbar", "AddText" }) do
+            tabObj[m] = function(self, o)
+                o = norm(o)
+                if flagged[m] and cfgSys and o.Flag == nil and not o.NoSave then
+                    o.Flag = tabTitle .. "/" .. tostring(o.Title)
+                end
+                if o.Flag == false or o.NoSave then o.Flag = nil end
+                local sec = curSection(self)
+                local el = sec[m](sec, o)
+                -- v0 behaviour: a toggle created ON reports it to its callback
+                if m == "AddToggle" and o.Default and o.Callback then task.spawn(o.Callback, true) end
+                return el
+            end
+        end
+
+        -- v0 AddLabel(text) was a wrapping text line with :Set(text)
+        function tabObj:AddLabel(o)
+            if type(o) == "table" then o = o.Title or o.Text or o.Name end
+            local sec = curSection(self)
+            local t = sec:AddText({ Text = tostring(o or "") })
+            return t
+        end
+        function tabObj:AddDivider()
+            local sec = curSection(self)
+            return sec:AddDivider()
+        end
+
         tabs[#tabs + 1] = tabObj
 
         -- auto-select first tab
@@ -2358,24 +2932,121 @@ function Velt:CreateWindow(config)
     end
 
     function window:Notify(cfg)
+        if type(cfg) == "string" then cfg = { Content = cfg } end
         notify(cfg)
     end
 
-    function window:SaveConfig()
-        if cfgSys then cfgSys:Save() end
+    function window:Toggle() setVisible(not window._visible) end
+    function window:Show() if not window._visible then setVisible(true) end end
+    function window:Hide() if window._visible then setVisible(false) end end
+    function window:Minimize() setVisible(not window._visible) end
+    function window:IsVisible() return window._visible end
+
+    -- SetSize(w, h) / SetSize(UDim2) / SetSize(Vector2)
+    function window:SetSize(w, h)
+        if type(w) ~= "number" then
+            local ok, a, b = pcall(function()
+                local x = w.X
+                if type(x) == "number" then return x, w.Y end
+                return x.Offset, w.Y.Offset
+            end)
+            if not ok then return end
+            w, h = a, b
+        end
+        if type(w) ~= "number" or type(h) ~= "number" then return end
+        applySize(w, h, window._visible)
+    end
+    function window:GetSize() return Vector2.new(curW, curH) end
+
+    function window:SetTitle(t)
+        windowTitle = tostring(t)
+        titleLabel.Text = windowTitle
     end
 
-    function window:LoadConfig()
-        if cfgSys then cfgSys:Load() end
+    -- config: autosave + named presets (needs SaveConfig = true)
+    function window:SaveConfig(name)
+        if not cfgSys then return false end
+        if name then return cfgSys:SavePreset(name) end
+        return cfgSys:Save()
+    end
+    function window:LoadConfig(name)
+        if not cfgSys then return false end
+        if name then return cfgSys:LoadPreset(name) end
+        cfgSys:Load()
+        cfgSys:Apply(cfgSys.data)
+        return true
+    end
+    function window:ListConfigs() return cfgSys and cfgSys:ListPresets() or {} end
+    function window:DeleteConfig(name) if cfgSys then cfgSys:DeletePreset(name) end end
+
+    local configTab
+    function window:AddConfigTab()
+        if configTab then selectTab(configTab) return configTab end
+        configTab = window:AddTab({ Title = "Config" })
+        if not cfgSys then
+            local s = configTab:AddSection({ Title = "Config" })
+            s:AddText({ Text = "Config saving is off for this script (SaveConfig = false)." })
+            return configTab
+        end
+        local sec = configTab:AddSection({ Title = "Presets" })
+        local typed, picked = "", nil
+        local dd
+        local function refresh()
+            if not dd then return end
+            dd:Clear()
+            for _, n in ipairs(cfgSys:ListPresets()) do dd:Add(n) end
+        end
+        sec:AddInput({ Title = "New preset name", Placeholder = "my preset", Callback = function(v) typed = v end })
+        sec:AddButton({ Title = "Save as new preset", Callback = function()
+            if cfgSys:SavePreset(typed) then
+                window:Notify({ Title = "Config", Content = "Saved \"" .. cfgSys.CleanName(typed) .. "\"", Type = "Success" })
+                refresh()
+            else
+                window:Notify({ Title = "Config", Content = "Type a preset name first.", Type = "Warning" })
+            end
+        end })
+        dd = sec:AddDropdown({ Title = "Saved presets", Options = cfgSys:ListPresets(), Searchable = true,
+            Callback = function(v) picked = v end })
+        sec:AddButton({ Title = "Load selected", Callback = function()
+            if picked and cfgSys:LoadPreset(picked) then
+                window:Notify({ Title = "Config", Content = "Loaded \"" .. picked .. "\"", Type = "Success" })
+            else
+                window:Notify({ Title = "Config", Content = "Pick a preset in the list first.", Type = "Warning" })
+            end
+        end })
+        sec:AddButton({ Title = "Overwrite selected", Callback = function()
+            if picked and cfgSys:SavePreset(picked) then
+                window:Notify({ Title = "Config", Content = "Saved \"" .. picked .. "\"", Type = "Success" })
+            else
+                window:Notify({ Title = "Config", Content = "Pick a preset in the list first.", Type = "Warning" })
+            end
+        end })
+        sec:AddButton({ Title = "Delete selected", Callback = function()
+            if picked then
+                cfgSys:DeletePreset(picked)
+                window:Notify({ Title = "Config", Content = "Deleted \"" .. picked .. "\"", Type = "Info" })
+                picked = nil
+                refresh()
+            else
+                window:Notify({ Title = "Config", Content = "Pick a preset in the list first.", Type = "Warning" })
+            end
+        end })
+        sec:AddButton({ Title = "Refresh list", Callback = refresh })
+        return configTab
+    end
+    function window:OpenConfig()
+        local t = window:AddConfigTab()
+        selectTab(t)
+        window:Show()
+    end
+
+    if profileBtn then
+        profileBtn.MouseButton1Click:Connect(function() window:OpenConfig() end)
     end
 
     function window:Destroy()
         if cfgSys then cfgSys:Save() end
         windowMaid:Cleanup()
-    end
-
-    function window:Minimize()
-        toggleVisibility()
     end
 
     function window:AddTheme(name, themeTable)
@@ -2388,14 +3059,10 @@ function Velt:CreateWindow(config)
     end
 
     -- Intro animation
-    mainFrame.Size = UDim2.new(0, windowSize.X.Offset, 0, 0)
-    mainFrame.BackgroundTransparency = 0.5
+    mainFrame.Size = UDim2.fromOffset(curW, 0)
     task.spawn(function()
         task.wait(0.05)
-        Util.tween(mainFrame, {
-            Size = windowSize,
-            BackgroundTransparency = 0
-        }, 0.4, Enum.EasingStyle.Back)
+        Util.tween(mainFrame, { Size = UDim2.fromOffset(curW, curH) }, 0.35, Enum.EasingStyle.Quint)
     end)
 
     return window
