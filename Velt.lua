@@ -7,7 +7,6 @@
       ╚═══╝  ╚══════╝╚══════╝╚═╝
 
     Velt UI Library v2.0.0
-    Modern · Minimal · Warm
 
     Usage:
         local Velt = loadstring(game:HttpGet("url"))()
@@ -294,13 +293,13 @@ end
 local function C(r, g, b) return Color3.fromRGB(r, g, b) end
 
 local Themes = {
-    -- calm slate + pale sage (default)
-    Sage = mkTheme({
-        Background = C(13, 19, 21), Sidebar = C(16, 24, 26), Card = C(21, 31, 34), CardBorder = C(38, 54, 58),
-        Surface = C(29, 42, 46), SurfaceHover = C(37, 52, 57),
-        Text = C(232, 239, 235), TextDim = C(142, 163, 157), TextDark = C(86, 106, 102),
-        Accent = C(170, 205, 184), AccentHover = C(196, 226, 208), AccentDark = C(88, 120, 102), OnAccent = C(12, 22, 19),
-        ToggleOff = C(40, 56, 61), SliderTrack = C(36, 50, 55),
+    -- neutral graphite, one restrained azure accent (default)
+    Graphite = mkTheme({
+        Background = C(15, 15, 18), Sidebar = C(19, 19, 23), Card = C(24, 24, 29), CardBorder = C(41, 41, 48),
+        Surface = C(32, 32, 38), SurfaceHover = C(41, 41, 49),
+        Text = C(237, 237, 241), TextDim = C(148, 148, 160), TextDark = C(94, 94, 106),
+        Accent = C(92, 140, 255), AccentHover = C(122, 163, 255), AccentDark = C(58, 98, 200), OnAccent = C(255, 255, 255),
+        ToggleOff = C(52, 52, 60), SliderTrack = C(43, 43, 51),
     }),
     -- near-black with warm orange
     Obsidian = mkTheme({
@@ -921,7 +920,7 @@ end
 function Velt:CreateWindow(config)
     config = config or {}
     local windowTitle   = tostring(config.Title or config.Name or "Velt")
-    local themeName     = config.Theme or "Sage"
+    local themeName     = config.Theme or "Graphite"
     local toggleKey     = config.ToggleKey or config.MinimizeKey or Enum.KeyCode.RightShift
     local saveConfig    = config.SaveConfig or false
     local configFolder  = config.ConfigFolder or "VeltConfig"
@@ -930,7 +929,7 @@ function Velt:CreateWindow(config)
     local closeDestroys = (config.CloseAction == "Destroy")
     local windowMaid    = Maid.new()
 
-    if type(themeName) == "string" and not Themes[themeName] then themeName = "Sage" end
+    if type(themeName) == "string" and not Themes[themeName] then themeName = "Graphite" end
     ThemeEngine:Apply(themeName, false)
     local theme = ThemeEngine._current
     local function T() return ThemeEngine._current or theme end
@@ -1041,39 +1040,47 @@ function Velt:CreateWindow(config)
     })
     ThemeEngine:Bind(tbLine, "BackgroundColor3", "CardBorder")
 
-    -- logo (image) or accent dot
+    -- logo badge
+    local badge = Util.create("Frame", {
+        Name = "LogoBadge",
+        Parent = titleBar,
+        BackgroundColor3 = theme.Surface,
+        Size = UDim2.new(0, 30, 0, 30),
+        Position = UDim2.new(0, 12, 0.5, 0),
+        AnchorPoint = Vector2.new(0, 0.5),
+        ZIndex = 11,
+    })
+    ThemeEngine:Bind(badge, "BackgroundColor3", "Surface")
+    Util.create("UICorner", { CornerRadius = UDim.new(0, 9), Parent = badge })
+    local bStroke = Util.create("UIStroke", { Color = theme.CardBorder, Thickness = 1, Transparency = 0.4, Parent = badge })
+    ThemeEngine:Bind(bStroke, "Color", "CardBorder")
     if logoImage then
         local img = Util.create("ImageLabel", {
-            Parent = titleBar,
+            Parent = badge,
             BackgroundTransparency = 1,
-            Size = UDim2.new(0, 26, 0, 26),
-            Position = UDim2.new(0, 14, 0.5, 0),
-            AnchorPoint = Vector2.new(0, 0.5),
+            Size = UDim2.new(0, 20, 0, 20),
+            Position = UDim2.new(0.5, 0, 0.5, 0),
+            AnchorPoint = Vector2.new(0.5, 0.5),
             Image = logoImage,
-            ImageColor3 = theme.Accent,
+            ImageColor3 = theme.Text,
             ScaleType = Enum.ScaleType.Fit,
-            ZIndex = 11,
+            ZIndex = 12,
         })
-        ThemeEngine:Bind(img, "ImageColor3", "Accent")
+        ThemeEngine:Bind(img, "ImageColor3", "Text")
     else
-        local dot = Util.create("Frame", {
-            Parent = titleBar,
-            BackgroundColor3 = theme.Accent,
-            Size = UDim2.new(0, 10, 0, 10),
-            Position = UDim2.new(0, 20, 0.5, 0),
-            AnchorPoint = Vector2.new(0, 0.5),
-            ZIndex = 11,
+        local lt = Util.create("TextLabel", {
+            Parent = badge, BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1),
+            Font = theme.FontBold, TextSize = 15, Text = "V", TextColor3 = theme.Text, ZIndex = 12,
         })
-        ThemeEngine:Bind(dot, "BackgroundColor3", "Accent")
-        Util.create("UICorner", { CornerRadius = UDim.new(1, 0), Parent = dot })
+        ThemeEngine:Bind(lt, "TextColor3", "Text")
     end
 
     local subtitle = config.Subtitle
     local titleLabel = Util.create("TextLabel", {
         Parent = titleBar,
         BackgroundTransparency = 1,
-        Position = UDim2.new(0, 50, 0, subtitle and 7 or 0),
-        Size = UDim2.new(1, -(50 + 90), 0, subtitle and 18 or TB),
+        Position = UDim2.new(0, 52, 0, subtitle and 7 or 0),
+        Size = UDim2.new(1, -(52 + 104), 0, subtitle and 18 or TB),
         Font = theme.FontBold,
         TextColor3 = theme.Text,
         TextSize = 14,
@@ -1087,8 +1094,8 @@ function Velt:CreateWindow(config)
         local sub = Util.create("TextLabel", {
             Parent = titleBar,
             BackgroundTransparency = 1,
-            Position = UDim2.new(0, 50, 0, 25),
-            Size = UDim2.new(1, -(50 + 90), 0, 14),
+            Position = UDim2.new(0, 52, 0, 25),
+            Size = UDim2.new(1, -(52 + 104), 0, 14),
             Font = theme.FontLight,
             TextColor3 = theme.TextDim,
             TextSize = 10,
@@ -1100,25 +1107,26 @@ function Velt:CreateWindow(config)
         ThemeEngine:Bind(sub, "TextColor3", "TextDim")
     end
 
-    -- window controls (glyphs are drawn from frames: font independent)
+    -- window controls: two small squared buttons, glyphs drawn from frames (font independent)
     local function makeControlBtn(kind, offsetX, hoverKey)
         local btn = Util.create("TextButton", {
             Parent = titleBar,
             BackgroundColor3 = theme.Surface,
-            BackgroundTransparency = 1,
+            BackgroundTransparency = 0.35,
             Position = UDim2.new(1, offsetX, 0.5, 0),
-            Size = UDim2.new(0, 32, 0, 30),
+            Size = UDim2.new(0, 28, 0, 28),
             AnchorPoint = Vector2.new(0.5, 0.5),
             Text = "",
             AutoButtonColor = false,
             ZIndex = 12,
         })
+        ThemeEngine:Bind(btn, "BackgroundColor3", "Surface")
         Util.create("UICorner", { CornerRadius = UDim.new(0, 8), Parent = btn })
         local bars = {}
         local function bar(rot, w)
             local f = Util.create("Frame", {
                 Parent = btn,
-                Size = UDim2.fromOffset(w, 2),
+                Size = UDim2.fromOffset(w, 1.6),
                 Position = UDim2.new(0.5, 0, 0.5, 0),
                 AnchorPoint = Vector2.new(0.5, 0.5),
                 Rotation = rot,
@@ -1126,24 +1134,25 @@ function Velt:CreateWindow(config)
                 BorderSizePixel = 0,
                 ZIndex = 13,
             })
-            Util.create("UICorner", { CornerRadius = UDim.new(1, 0), Parent = f })
             ThemeEngine:Bind(f, "BackgroundColor3", "TextDim")
             bars[#bars + 1] = f
         end
-        if kind == "close" then bar(45, 13) bar(-45, 13) else bar(0, 12) end
+        if kind == "close" then bar(45, 11) bar(-45, 11) else bar(0, 10) end
         btn.MouseEnter:Connect(function()
-            Util.tween(btn, { BackgroundTransparency = 0.4 }, 0.15)
-            for _, f in ipairs(bars) do Util.tween(f, { BackgroundColor3 = T()[hoverKey] }, 0.15) end
+            local th = T()
+            Util.tween(btn, { BackgroundColor3 = (kind == "close") and th.Error or th.SurfaceHover, BackgroundTransparency = (kind == "close") and 0.78 or 0 }, 0.15)
+            for _, f in ipairs(bars) do Util.tween(f, { BackgroundColor3 = th[hoverKey] }, 0.15) end
         end)
         btn.MouseLeave:Connect(function()
-            Util.tween(btn, { BackgroundTransparency = 1 }, 0.15)
-            for _, f in ipairs(bars) do Util.tween(f, { BackgroundColor3 = T().TextDim }, 0.15) end
+            local th = T()
+            Util.tween(btn, { BackgroundColor3 = th.Surface, BackgroundTransparency = 0.35 }, 0.15)
+            for _, f in ipairs(bars) do Util.tween(f, { BackgroundColor3 = th.TextDim }, 0.15) end
         end)
         return btn
     end
 
-    local closeBtn = makeControlBtn("close", -22, "Error")
-    local minBtn   = makeControlBtn("min", -58, "Text")
+    local closeBtn = makeControlBtn("close", -26, "Error")
+    local minBtn   = makeControlBtn("min", -62, "Text")
 
     -- drag by title bar (kept on-screen)
     do
@@ -1789,21 +1798,20 @@ function Velt:CreateWindow(config)
             CanvasSize = UDim2.new(0, 0, 0, 0),
             AutomaticCanvasSize = Enum.AutomaticSize.Y,
             ScrollBarThickness = 3,
-            ScrollBarImageColor3 = theme.Accent,
-            ScrollBarImageTransparency = 0.6,
+            ScrollBarImageColor3 = theme.TextDark,
+            ScrollBarImageTransparency = 0.3,
+            ScrollingDirection = Enum.ScrollingDirection.Y,
+            VerticalScrollBarInset = Enum.ScrollBarInset.None,
             Visible = false,
             ZIndex = 5,
             BorderSizePixel = 0,
         })
-        Util.create("UIPadding", {
-            PaddingTop = UDim.new(0, 2), PaddingBottom = UDim.new(0, 16),
-            PaddingLeft = UDim.new(0, 12), PaddingRight = UDim.new(0, 12),
-            Parent = page,
-        })
         local holder = Util.create("Frame", {
             Parent = page, BackgroundTransparency = 1,
-            Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, ZIndex = 5,
+            Position = UDim2.new(0, 14, 0, 2),
+            Size = UDim2.new(1, -28, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, ZIndex = 5,
         })
+        Util.create("UIPadding", { PaddingBottom = UDim.new(0, 18), Parent = holder })
         local function makeCol()
             local c = Util.create("Frame", {
                 Parent = holder, BackgroundTransparency = 1,
@@ -1872,7 +1880,7 @@ function Velt:CreateWindow(config)
             })
             local bodyPad = Util.create("UIPadding", {
                 PaddingTop = UDim.new(0, 6), PaddingBottom = UDim.new(0, 10),
-                PaddingLeft = UDim.new(0, 14), PaddingRight = UDim.new(0, 14), Parent = body,
+                PaddingLeft = UDim.new(0, 16), PaddingRight = UDim.new(0, 16), Parent = body,
             })
             Util.create("UIListLayout", { Parent = body, SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 4) })
 
@@ -2082,10 +2090,10 @@ function Velt:CreateWindow(config)
                 local valueLabel = Util.create("TextLabel", {
                     Parent = valueBox, BackgroundTransparency = 1,
                     Size = UDim2.new(0, 0, 1, 0), AutomaticSize = Enum.AutomaticSize.X,
-                    Font = theme.FontBold, TextColor3 = theme.Accent, TextSize = 12,
+                    Font = theme.FontBold, TextColor3 = theme.Text, TextSize = 12,
                     Text = tostring(Util.round(value, 2)) .. suffix, ZIndex = 10,
                 })
-                ThemeEngine:Bind(valueLabel, "TextColor3", "Accent")
+                ThemeEngine:Bind(valueLabel, "TextColor3", "Text")
 
                 local trackFrame = Util.create("Frame", {
                     Parent = row, BackgroundColor3 = theme.SliderTrack,
