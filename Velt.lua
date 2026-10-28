@@ -6,7 +6,9 @@
      ╚████╔╝ ███████╗███████╗██║
       ╚═══╝  ╚══════╝╚══════╝╚═╝
 
-    Velt UI Library v1.1.0
+    Velt UI Library v2.0.0
+    Modern · Minimal · Warm
+
     Usage:
         local Velt = loadstring(game:HttpGet("url"))()
         local Window = Velt:CreateWindow({
@@ -20,6 +22,9 @@
         local Section = Tab:AddSection({ Title = "Combat" })
         Section:AddToggle({ Title = "Enabled", Default = false, Flag = "AimbotOn", Callback = function(v) end })
 
+    v2.0  new look: icon rail sidebar (labels on wide windows), page header with search, collapsible
+          section cards, two columns on wide windows, tab groups, stat tiles, new themes.
+          Icons come from velt_icons.png in the Velt asset repo (letter badges if it can't be downloaded).
     v1.1 additions
         - Sage theme (default), floating logo button (tap = open/close, drag = move), close hides
         - Window fits the phone screen, resize grip, Window:SetSize / :Toggle / .Gui / .OnVisibility
@@ -266,167 +271,86 @@ end
 ----------------------------------------------------------------
 -- Theme Engine
 ----------------------------------------------------------------
+local function mkTheme(t)
+    local function mix(a, b, k) return a:Lerp(b, k) end
+    t.AccentGradient = ColorSequence.new({
+        ColorSequenceKeypoint.new(0, t.Accent),
+        ColorSequenceKeypoint.new(1, mix(t.Accent, t.AccentDark, 0.45)),
+    })
+    t.TitleBar     = t.TitleBar or t.Sidebar
+    t.Success      = t.Success or Color3.fromRGB(74, 210, 140)
+    t.Warning      = t.Warning or Color3.fromRGB(240, 190, 80)
+    t.Error        = t.Error or Color3.fromRGB(240, 96, 108)
+    t.Info         = t.Info or Color3.fromRGB(110, 160, 245)
+    t.Shadow       = t.Shadow or Color3.fromRGB(0, 0, 0)
+    t.CornerRadius = UDim.new(0, 10)
+    t.CornerSmall  = UDim.new(0, 8)
+    t.Font         = Enum.Font.GothamMedium
+    t.FontBold     = Enum.Font.GothamBold
+    t.FontLight    = Enum.Font.Gotham
+    return t
+end
+
+local function C(r, g, b) return Color3.fromRGB(r, g, b) end
+
 local Themes = {
-    Sage = {
-        Background      = Color3.fromRGB(15, 22, 24),
-        Sidebar         = Color3.fromRGB(19, 28, 31),
-        TitleBar        = Color3.fromRGB(19, 28, 31),
-        Card            = Color3.fromRGB(25, 36, 40),
-        CardBorder      = Color3.fromRGB(44, 62, 66),
-        Surface         = Color3.fromRGB(32, 46, 51),
-        SurfaceHover    = Color3.fromRGB(40, 57, 63),
-        Text            = Color3.fromRGB(230, 238, 234),
-        TextDim         = Color3.fromRGB(127, 149, 144),
-        TextDark        = Color3.fromRGB(84, 106, 102),
-        Accent          = Color3.fromRGB(183, 211, 192),
-        AccentHover     = Color3.fromRGB(205, 228, 213),
-        AccentDark      = Color3.fromRGB(96, 124, 108),
-        OnAccent        = Color3.fromRGB(15, 24, 22),
-        ToggleOff       = Color3.fromRGB(38, 54, 59),
-        SliderTrack     = Color3.fromRGB(36, 51, 56),
-        Success         = Color3.fromRGB(52, 211, 153),
-        Warning         = Color3.fromRGB(240, 190, 90),
-        Error           = Color3.fromRGB(240, 92, 112),
-        Info            = Color3.fromRGB(129, 140, 248),
-        Shadow          = Color3.fromRGB(0, 0, 0),
-        AccentGradient  = ColorSequence.new({
-            ColorSequenceKeypoint.new(0, Color3.fromRGB(190, 218, 199)),
-            ColorSequenceKeypoint.new(1, Color3.fromRGB(150, 184, 164))
-        }),
-        CornerRadius    = UDim.new(0, 8),
-        CornerSmall     = UDim.new(0, 6),
-        Font            = Enum.Font.GothamMedium,
-        FontBold        = Enum.Font.GothamBold,
-        FontLight       = Enum.Font.Gotham,
-    },
-
-    Obsidian = {
-        Background      = Color3.fromRGB(10, 10, 14),
-        Sidebar         = Color3.fromRGB(14, 14, 18),
-        TitleBar        = Color3.fromRGB(14, 14, 18),
-        Card            = Color3.fromRGB(20, 20, 26),
-        CardBorder      = Color3.fromRGB(38, 38, 46),
-        Surface         = Color3.fromRGB(26, 26, 32),
-        SurfaceHover    = Color3.fromRGB(34, 34, 42),
-        Text            = Color3.fromRGB(235, 230, 222),
-        TextDim         = Color3.fromRGB(130, 126, 118),
-        TextDark        = Color3.fromRGB(80, 78, 72),
-        Accent          = Color3.fromRGB(210, 130, 80),
-        AccentHover     = Color3.fromRGB(230, 150, 100),
-        AccentDark      = Color3.fromRGB(170, 100, 60),
-        ToggleOff       = Color3.fromRGB(44, 44, 52),
-        SliderTrack     = Color3.fromRGB(36, 36, 44),
-        Success         = Color3.fromRGB(80, 200, 120),
-        Warning         = Color3.fromRGB(240, 180, 60),
-        Error           = Color3.fromRGB(230, 80, 80),
-        Info            = Color3.fromRGB(80, 160, 240),
-        Shadow          = Color3.fromRGB(0, 0, 0),
-        AccentGradient  = ColorSequence.new({
-            ColorSequenceKeypoint.new(0, Color3.fromRGB(210, 110, 60)),
-            ColorSequenceKeypoint.new(1, Color3.fromRGB(190, 80, 130))
-        }),
-        CornerRadius    = UDim.new(0, 8),
-        CornerSmall     = UDim.new(0, 6),
-        Font            = Enum.Font.GothamMedium,
-        FontBold        = Enum.Font.GothamBold,
-        FontLight        = Enum.Font.Gotham,
-    },
-
-    Midnight = {
-        Background      = Color3.fromRGB(8, 10, 18),
-        Sidebar         = Color3.fromRGB(12, 14, 24),
-        TitleBar        = Color3.fromRGB(12, 14, 24),
-        Card            = Color3.fromRGB(18, 20, 32),
-        CardBorder      = Color3.fromRGB(32, 36, 52),
-        Surface         = Color3.fromRGB(22, 24, 36),
-        SurfaceHover    = Color3.fromRGB(30, 32, 46),
-        Text            = Color3.fromRGB(225, 228, 240),
-        TextDim         = Color3.fromRGB(120, 124, 140),
-        TextDark        = Color3.fromRGB(70, 74, 88),
-        Accent          = Color3.fromRGB(100, 130, 240),
-        AccentHover     = Color3.fromRGB(120, 150, 255),
-        AccentDark      = Color3.fromRGB(80, 110, 200),
-        ToggleOff       = Color3.fromRGB(36, 38, 50),
-        SliderTrack     = Color3.fromRGB(30, 32, 44),
-        Success         = Color3.fromRGB(80, 200, 140),
-        Warning         = Color3.fromRGB(240, 190, 70),
-        Error           = Color3.fromRGB(230, 80, 90),
-        Info            = Color3.fromRGB(100, 170, 240),
-        Shadow          = Color3.fromRGB(0, 0, 4),
-        AccentGradient  = ColorSequence.new({
-            ColorSequenceKeypoint.new(0, Color3.fromRGB(80, 110, 240)),
-            ColorSequenceKeypoint.new(1, Color3.fromRGB(140, 80, 220))
-        }),
-        CornerRadius    = UDim.new(0, 8),
-        CornerSmall     = UDim.new(0, 6),
-        Font            = Enum.Font.GothamMedium,
-        FontBold        = Enum.Font.GothamBold,
-        FontLight        = Enum.Font.Gotham,
-    },
-
-    Ember = {
-        Background      = Color3.fromRGB(14, 8, 8),
-        Sidebar         = Color3.fromRGB(18, 12, 12),
-        TitleBar        = Color3.fromRGB(18, 12, 12),
-        Card            = Color3.fromRGB(26, 18, 18),
-        CardBorder      = Color3.fromRGB(48, 34, 34),
-        Surface         = Color3.fromRGB(30, 22, 22),
-        SurfaceHover    = Color3.fromRGB(40, 30, 30),
-        Text            = Color3.fromRGB(240, 228, 222),
-        TextDim         = Color3.fromRGB(140, 120, 112),
-        TextDark        = Color3.fromRGB(88, 70, 65),
-        Accent          = Color3.fromRGB(230, 90, 60),
-        AccentHover     = Color3.fromRGB(250, 110, 80),
-        AccentDark      = Color3.fromRGB(190, 70, 45),
-        ToggleOff       = Color3.fromRGB(48, 36, 36),
-        SliderTrack     = Color3.fromRGB(40, 30, 30),
-        Success         = Color3.fromRGB(100, 200, 100),
-        Warning         = Color3.fromRGB(240, 180, 60),
-        Error           = Color3.fromRGB(240, 70, 70),
-        Info            = Color3.fromRGB(100, 160, 220),
-        Shadow          = Color3.fromRGB(4, 0, 0),
-        AccentGradient  = ColorSequence.new({
-            ColorSequenceKeypoint.new(0, Color3.fromRGB(240, 80, 40)),
-            ColorSequenceKeypoint.new(1, Color3.fromRGB(200, 50, 80))
-        }),
-        CornerRadius    = UDim.new(0, 8),
-        CornerSmall     = UDim.new(0, 6),
-        Font            = Enum.Font.GothamMedium,
-        FontBold        = Enum.Font.GothamBold,
-        FontLight        = Enum.Font.Gotham,
-    },
-
-    Frost = {
-        Background      = Color3.fromRGB(240, 242, 248),
-        Sidebar         = Color3.fromRGB(230, 232, 240),
-        TitleBar        = Color3.fromRGB(234, 236, 244),
-        Card            = Color3.fromRGB(250, 252, 255),
-        CardBorder      = Color3.fromRGB(210, 214, 226),
-        Surface         = Color3.fromRGB(234, 236, 244),
-        SurfaceHover    = Color3.fromRGB(224, 226, 236),
-        Text            = Color3.fromRGB(24, 26, 34),
-        TextDim         = Color3.fromRGB(100, 104, 118),
-        TextDark        = Color3.fromRGB(160, 164, 176),
-        Accent          = Color3.fromRGB(80, 120, 210),
-        AccentHover     = Color3.fromRGB(60, 100, 190),
-        AccentDark      = Color3.fromRGB(100, 140, 230),
-        ToggleOff       = Color3.fromRGB(200, 204, 216),
-        SliderTrack     = Color3.fromRGB(210, 214, 226),
-        Success         = Color3.fromRGB(40, 160, 80),
-        Warning         = Color3.fromRGB(210, 150, 30),
-        Error           = Color3.fromRGB(210, 60, 60),
-        Info            = Color3.fromRGB(50, 130, 210),
-        Shadow          = Color3.fromRGB(180, 184, 196),
-        AccentGradient  = ColorSequence.new({
-            ColorSequenceKeypoint.new(0, Color3.fromRGB(60, 100, 210)),
-            ColorSequenceKeypoint.new(1, Color3.fromRGB(120, 80, 200))
-        }),
-        CornerRadius    = UDim.new(0, 8),
-        CornerSmall     = UDim.new(0, 6),
-        Font            = Enum.Font.GothamMedium,
-        FontBold        = Enum.Font.GothamBold,
-        FontLight        = Enum.Font.Gotham,
-    },
+    -- calm slate + pale sage (default)
+    Sage = mkTheme({
+        Background = C(13, 19, 21), Sidebar = C(16, 24, 26), Card = C(21, 31, 34), CardBorder = C(38, 54, 58),
+        Surface = C(29, 42, 46), SurfaceHover = C(37, 52, 57),
+        Text = C(232, 239, 235), TextDim = C(142, 163, 157), TextDark = C(86, 106, 102),
+        Accent = C(170, 205, 184), AccentHover = C(196, 226, 208), AccentDark = C(88, 120, 102), OnAccent = C(12, 22, 19),
+        ToggleOff = C(40, 56, 61), SliderTrack = C(36, 50, 55),
+    }),
+    -- near-black with warm orange
+    Obsidian = mkTheme({
+        Background = C(10, 10, 12), Sidebar = C(13, 13, 16), Card = C(19, 19, 23), CardBorder = C(38, 38, 44),
+        Surface = C(28, 28, 33), SurfaceHover = C(37, 37, 43),
+        Text = C(240, 236, 230), TextDim = C(142, 136, 128), TextDark = C(88, 84, 78),
+        Accent = C(255, 128, 48), AccentHover = C(255, 150, 80), AccentDark = C(176, 84, 30), OnAccent = C(22, 10, 4),
+        ToggleOff = C(46, 46, 52), SliderTrack = C(40, 40, 46),
+    }),
+    -- soft pink on aubergine black
+    Rose = mkTheme({
+        Background = C(14, 10, 13), Sidebar = C(18, 13, 17), Card = C(25, 18, 23), CardBorder = C(50, 36, 45),
+        Surface = C(34, 25, 32), SurfaceHover = C(44, 32, 41),
+        Text = C(246, 235, 241), TextDim = C(162, 136, 152), TextDark = C(102, 82, 94),
+        Accent = C(240, 100, 150), AccentHover = C(250, 126, 172), AccentDark = C(168, 62, 102), OnAccent = C(32, 6, 16),
+        ToggleOff = C(54, 40, 50), SliderTrack = C(46, 34, 42),
+    }),
+    -- deep teal
+    Ocean = mkTheme({
+        Background = C(8, 22, 28), Sidebar = C(10, 28, 35), Card = C(14, 36, 44), CardBorder = C(28, 68, 78),
+        Surface = C(20, 50, 60), SurfaceHover = C(27, 63, 75),
+        Text = C(228, 243, 246), TextDim = C(132, 172, 180), TextDark = C(80, 116, 124),
+        Accent = C(72, 202, 202), AccentHover = C(102, 224, 224), AccentDark = C(36, 130, 134), OnAccent = C(4, 22, 24),
+        ToggleOff = C(30, 64, 74), SliderTrack = C(26, 58, 68),
+    }),
+    -- indigo night
+    Midnight = mkTheme({
+        Background = C(10, 12, 22), Sidebar = C(13, 16, 28), Card = C(19, 22, 38), CardBorder = C(36, 42, 68),
+        Surface = C(27, 31, 52), SurfaceHover = C(35, 40, 66),
+        Text = C(228, 232, 246), TextDim = C(132, 140, 170), TextDark = C(84, 90, 118),
+        Accent = C(122, 142, 255), AccentHover = C(148, 166, 255), AccentDark = C(80, 96, 200), OnAccent = C(8, 10, 30),
+        ToggleOff = C(40, 45, 70), SliderTrack = C(34, 38, 60),
+    }),
+    -- greyscale
+    Mono = mkTheme({
+        Background = C(12, 12, 12), Sidebar = C(16, 16, 16), Card = C(22, 22, 22), CardBorder = C(42, 42, 42),
+        Surface = C(31, 31, 31), SurfaceHover = C(40, 40, 40),
+        Text = C(238, 238, 238), TextDim = C(142, 142, 142), TextDark = C(88, 88, 88),
+        Accent = C(226, 226, 226), AccentHover = C(246, 246, 246), AccentDark = C(140, 140, 140), OnAccent = C(14, 14, 14),
+        ToggleOff = C(48, 48, 48), SliderTrack = C(40, 40, 40),
+    }),
+    -- light
+    Frost = mkTheme({
+        Background = C(240, 242, 248), Sidebar = C(230, 233, 241), Card = C(250, 251, 255), CardBorder = C(208, 213, 226),
+        Surface = C(236, 239, 247), SurfaceHover = C(226, 230, 240),
+        Text = C(24, 26, 34), TextDim = C(98, 104, 120), TextDark = C(158, 164, 178),
+        Accent = C(70, 110, 215), AccentHover = C(54, 94, 198), AccentDark = C(120, 150, 230), OnAccent = C(255, 255, 255),
+        ToggleOff = C(200, 205, 218), SliderTrack = C(210, 215, 228),
+        Shadow = C(180, 184, 196),
+    }),
 }
 
 -- Theme binding system
@@ -892,11 +816,97 @@ local function drawChevron(parent, cx, cy, colorKey, z)
 end
 
 ----------------------------------------------------------------
+-- Icon atlas (velt_icons.png: 8 columns x 4 rows, 64px cells, white on transparent)
+-- Downloaded once from the Velt asset repo; if it is unavailable a letter badge is used instead.
+----------------------------------------------------------------
+local ICON_URL  = "https://raw.githubusercontent.com/erszxu-hmm/velt-assets/main/velt_icons.png"
+local ICON_FILE = "velt_icons.png"
+local ICON_NAMES = {
+    "home", "sword", "eye", "user", "box", "filter", "bolt", "gear",
+    "save", "target", "crosshair", "leaf", "pointer", "book", "pin", "sparkles",
+    "list", "shield", "search", "users", "trend", "grid", "bell", "star",
+    "server", "flask", "heart", "wand", "dot", "map", "play", "lock",
+}
+local ICON_INDEX = {}
+for i, n in ipairs(ICON_NAMES) do ICON_INDEX[n] = i - 1 end
+
+local ICON_KEYWORDS = {
+    { "spot", "pin" }, { "teleport", "pin" }, { "herb", "leaf" }, { "farm", "leaf" }, { "manual", "pointer" },
+    { "quest", "book" }, { "target", "target" }, { "predict", "trend" }, { "aim", "crosshair" },
+    { "combat", "sword" }, { "fight", "sword" }, { "visual", "eye" }, { "esp", "eye" }, { "player", "user" },
+    { "loot", "box" }, { "shop", "box" }, { "filter", "filter" }, { "movement", "bolt" }, { "move", "bolt" },
+    { "speed", "bolt" }, { "setting", "gear" }, { "config", "save" }, { "class", "users" }, { "rule", "list" },
+    { "world", "map" }, { "server", "server" }, { "misc", "sparkles" }, { "home", "home" }, { "main", "home" },
+    { "info", "star" },
+}
+
+local function pickIcon(name, title)
+    if type(name) == "string" and ICON_INDEX[name:lower()] then return name:lower() end
+    local t = tostring(title or ""):lower()
+    for _, kv in ipairs(ICON_KEYWORDS) do
+        if t:find(kv[1], 1, true) then return kv[2] end
+    end
+    return "dot"
+end
+
+local iconAtlas -- nil = not tried yet, false = unavailable
+local function getAtlas()
+    if iconAtlas ~= nil then return iconAtlas end
+    iconAtlas = false
+    if Env.canFS then
+        if not Env.isFile(ICON_FILE) or not pngValid(ICON_FILE) then
+            pcall(function()
+                local data = game:HttpGet(ICON_URL)
+                if type(data) == "string" and data:sub(2, 4) == "PNG" then Env.writeFile(ICON_FILE, data) end
+            end)
+        end
+        if Env.isFile(ICON_FILE) and Env.getAsset then
+            local ok, asset = pcall(Env.getAsset, ICON_FILE)
+            if ok and asset and asset ~= "" then iconAtlas = asset end
+        end
+    end
+    return iconAtlas
+end
+
+-- returns the icon instance and the name of its color property
+local function makeIcon(parent, name, size, colorKey, z, bind, fallbackText)
+    local th = ThemeEngine._current
+    local atlas = getAtlas()
+    local idx = ICON_INDEX[name]
+    if atlas and idx then
+        local img = Util.create("ImageLabel", {
+            Parent = parent,
+            BackgroundTransparency = 1,
+            Size = UDim2.fromOffset(size, size),
+            Image = atlas,
+            ImageRectOffset = Vector2.new((idx % 8) * 64, math.floor(idx / 8) * 64),
+            ImageRectSize = Vector2.new(64, 64),
+            ImageColor3 = th[colorKey],
+            ZIndex = z or 8,
+        })
+        if bind then ThemeEngine:Bind(img, "ImageColor3", colorKey) end
+        return img, "ImageColor3"
+    end
+    local lbl = Util.create("TextLabel", {
+        Parent = parent,
+        BackgroundTransparency = 1,
+        Size = UDim2.fromOffset(size, size),
+        Font = Enum.Font.GothamBold,
+        TextSize = math.floor(size * 0.8),
+        Text = tostring(fallbackText or "?"):sub(1, 1):upper(),
+        TextColor3 = th[colorKey],
+        ZIndex = z or 8,
+    })
+    if bind then ThemeEngine:Bind(lbl, "TextColor3", colorKey) end
+    return lbl, "TextColor3"
+end
+
+----------------------------------------------------------------
 -- VELT LIBRARY
 ----------------------------------------------------------------
 local Velt = {}
 Velt.__index = Velt
-Velt.Version = "1.1.0"
+Velt.Version = "2.0.0"
 Velt.Themes = Themes
 Velt.ThemeEngine = ThemeEngine
 
@@ -996,37 +1006,48 @@ function Velt:CreateWindow(config)
         Active = true,
     })
     ThemeEngine:Bind(mainFrame, "BackgroundColor3", "Background")
-    Util.create("UICorner", { CornerRadius = UDim.new(0, 10), Parent = mainFrame })
+    Util.create("UICorner", { CornerRadius = UDim.new(0, 12), Parent = mainFrame })
     Util.create("UIStroke", { Color = theme.CardBorder, Thickness = 1, Transparency = 0.3, Parent = mainFrame })
 
     -- Title bar
+    local TB = 46
     local titleBar = Util.create("Frame", {
         Name = "TitleBar",
         Parent = mainFrame,
         BackgroundColor3 = theme.TitleBar,
-        Size = UDim2.new(1, 0, 0, 38),
+        Size = UDim2.new(1, 0, 0, TB),
         BorderSizePixel = 0,
         ZIndex = 10,
     })
     ThemeEngine:Bind(titleBar, "BackgroundColor3", "TitleBar")
-    Util.create("UICorner", { CornerRadius = UDim.new(0, 10), Parent = titleBar })
+    Util.create("UICorner", { CornerRadius = UDim.new(0, 12), Parent = titleBar })
     local tbFill = Util.create("Frame", {
         Parent = titleBar,
         BackgroundColor3 = theme.TitleBar,
-        Size = UDim2.new(1, 0, 0, 12),
-        Position = UDim2.new(0, 0, 1, -12),
+        Size = UDim2.new(1, 0, 0, 14),
+        Position = UDim2.new(0, 0, 1, -14),
         BorderSizePixel = 0,
         ZIndex = 10,
     })
     ThemeEngine:Bind(tbFill, "BackgroundColor3", "TitleBar")
+    local tbLine = Util.create("Frame", {
+        Parent = titleBar,
+        BackgroundColor3 = theme.CardBorder,
+        BackgroundTransparency = 0.35,
+        Size = UDim2.new(1, 0, 0, 1),
+        Position = UDim2.new(0, 0, 1, -1),
+        BorderSizePixel = 0,
+        ZIndex = 11,
+    })
+    ThemeEngine:Bind(tbLine, "BackgroundColor3", "CardBorder")
 
     -- logo (image) or accent dot
     if logoImage then
         local img = Util.create("ImageLabel", {
             Parent = titleBar,
             BackgroundTransparency = 1,
-            Size = UDim2.new(0, 22, 0, 22),
-            Position = UDim2.new(0, 10, 0.5, 0),
+            Size = UDim2.new(0, 26, 0, 26),
+            Position = UDim2.new(0, 14, 0.5, 0),
             AnchorPoint = Vector2.new(0, 0.5),
             Image = logoImage,
             ImageColor3 = theme.Accent,
@@ -1038,8 +1059,8 @@ function Velt:CreateWindow(config)
         local dot = Util.create("Frame", {
             Parent = titleBar,
             BackgroundColor3 = theme.Accent,
-            Size = UDim2.new(0, 8, 0, 8),
-            Position = UDim2.new(0, 14, 0.5, 0),
+            Size = UDim2.new(0, 10, 0, 10),
+            Position = UDim2.new(0, 20, 0.5, 0),
             AnchorPoint = Vector2.new(0, 0.5),
             ZIndex = 11,
         })
@@ -1047,49 +1068,37 @@ function Velt:CreateWindow(config)
         Util.create("UICorner", { CornerRadius = UDim.new(1, 0), Parent = dot })
     end
 
-    local titleX = 40
-    local brandText = config.Brand or "velt"
-    if config.Brand ~= false and windowTitle:lower() ~= tostring(brandText):lower() then
-        local brandLabel = Util.create("TextLabel", {
-            Parent = titleBar,
-            BackgroundTransparency = 1,
-            Position = UDim2.new(0, 38, 0, 0),
-            Size = UDim2.new(0, 32, 1, 0),
-            Font = Enum.Font.GothamBold,
-            TextColor3 = theme.Accent,
-            TextSize = 12,
-            Text = tostring(brandText),
-            TextXAlignment = Enum.TextXAlignment.Left,
-            ZIndex = 11,
-        })
-        ThemeEngine:Bind(brandLabel, "TextColor3", "Accent")
-        local div = Util.create("Frame", {
-            Parent = titleBar,
-            BackgroundColor3 = theme.CardBorder,
-            BackgroundTransparency = 0.5,
-            Position = UDim2.new(0, 76, 0.2, 0),
-            Size = UDim2.new(0, 1, 0.6, 0),
-            BorderSizePixel = 0,
-            ZIndex = 11,
-        })
-        ThemeEngine:Bind(div, "BackgroundColor3", "CardBorder")
-        titleX = 86
-    end
-
+    local subtitle = config.Subtitle
     local titleLabel = Util.create("TextLabel", {
         Parent = titleBar,
         BackgroundTransparency = 1,
-        Position = UDim2.new(0, titleX, 0, 0),
-        Size = UDim2.new(1, -(titleX + 84), 1, 0),
+        Position = UDim2.new(0, 50, 0, subtitle and 7 or 0),
+        Size = UDim2.new(1, -(50 + 90), 0, subtitle and 18 or TB),
         Font = theme.FontBold,
         TextColor3 = theme.Text,
-        TextSize = 13,
+        TextSize = 14,
         Text = windowTitle,
         TextXAlignment = Enum.TextXAlignment.Left,
         TextTruncate = Enum.TextTruncate.AtEnd,
         ZIndex = 11,
     })
     ThemeEngine:Bind(titleLabel, "TextColor3", "Text")
+    if subtitle then
+        local sub = Util.create("TextLabel", {
+            Parent = titleBar,
+            BackgroundTransparency = 1,
+            Position = UDim2.new(0, 50, 0, 25),
+            Size = UDim2.new(1, -(50 + 90), 0, 14),
+            Font = theme.FontLight,
+            TextColor3 = theme.TextDim,
+            TextSize = 10,
+            Text = tostring(subtitle),
+            TextXAlignment = Enum.TextXAlignment.Left,
+            TextTruncate = Enum.TextTruncate.AtEnd,
+            ZIndex = 11,
+        })
+        ThemeEngine:Bind(sub, "TextColor3", "TextDim")
+    end
 
     -- window controls (glyphs are drawn from frames: font independent)
     local function makeControlBtn(kind, offsetX, hoverKey)
@@ -1098,13 +1107,13 @@ function Velt:CreateWindow(config)
             BackgroundColor3 = theme.Surface,
             BackgroundTransparency = 1,
             Position = UDim2.new(1, offsetX, 0.5, 0),
-            Size = UDim2.new(0, 32, 0, 28),
+            Size = UDim2.new(0, 32, 0, 30),
             AnchorPoint = Vector2.new(0.5, 0.5),
             Text = "",
             AutoButtonColor = false,
             ZIndex = 12,
         })
-        Util.create("UICorner", { CornerRadius = UDim.new(0, 6), Parent = btn })
+        Util.create("UICorner", { CornerRadius = UDim.new(0, 8), Parent = btn })
         local bars = {}
         local function bar(rot, w)
             local f = Util.create("Frame", {
@@ -1123,7 +1132,7 @@ function Velt:CreateWindow(config)
         end
         if kind == "close" then bar(45, 13) bar(-45, 13) else bar(0, 12) end
         btn.MouseEnter:Connect(function()
-            Util.tween(btn, { BackgroundTransparency = 0.5 }, 0.15)
+            Util.tween(btn, { BackgroundTransparency = 0.4 }, 0.15)
             for _, f in ipairs(bars) do Util.tween(f, { BackgroundColor3 = T()[hoverKey] }, 0.15) end
         end)
         btn.MouseLeave:Connect(function()
@@ -1133,8 +1142,8 @@ function Velt:CreateWindow(config)
         return btn
     end
 
-    local closeBtn = makeControlBtn("close", -20, "Error")
-    local minBtn   = makeControlBtn("min", -56, "Text")
+    local closeBtn = makeControlBtn("close", -22, "Error")
+    local minBtn   = makeControlBtn("min", -58, "Text")
 
     -- drag by title bar (kept on-screen)
     do
@@ -1161,25 +1170,40 @@ function Velt:CreateWindow(config)
     end
 
     ----------------------------------------------------------------
-    -- Sidebar / content
+    -- Sidebar (icon rail on narrow windows) + profile card
     ----------------------------------------------------------------
+    local tabs = {}
+    local activeTab = nil
+    local groupHeads = {}
+    local isRail, twoCol = false, false
+
     local sidebar = Util.create("Frame", {
         Name = "Sidebar",
         Parent = mainFrame,
         BackgroundColor3 = theme.Sidebar,
-        Size = UDim2.new(0, 140, 1, -38),
-        Position = UDim2.new(0, 0, 0, 38),
+        Size = UDim2.new(0, 160, 1, -TB),
+        Position = UDim2.new(0, 0, 0, TB),
         BorderSizePixel = 0,
         ZIndex = 5,
     })
     ThemeEngine:Bind(sidebar, "BackgroundColor3", "Sidebar")
-
+    Util.create("UICorner", { CornerRadius = UDim.new(0, 12), Parent = sidebar })
+    local sbFillR = Util.create("Frame", {
+        Parent = sidebar, BackgroundColor3 = theme.Sidebar, BorderSizePixel = 0, ZIndex = 5,
+        Size = UDim2.new(0, 14, 1, 0), Position = UDim2.new(1, -14, 0, 0),
+    })
+    ThemeEngine:Bind(sbFillR, "BackgroundColor3", "Sidebar")
+    local sbFillT = Util.create("Frame", {
+        Parent = sidebar, BackgroundColor3 = theme.Sidebar, BorderSizePixel = 0, ZIndex = 5,
+        Size = UDim2.new(1, 0, 0, 14), Position = UDim2.new(0, 0, 0, 0),
+    })
+    ThemeEngine:Bind(sbFillT, "BackgroundColor3", "Sidebar")
     local sbLine = Util.create("Frame", {
         Parent = sidebar,
         BackgroundColor3 = theme.CardBorder,
-        BackgroundTransparency = 0.6,
-        Position = UDim2.new(1, -1, 0, 8),
-        Size = UDim2.new(0, 1, 1, -16),
+        BackgroundTransparency = 0.45,
+        Position = UDim2.new(1, -1, 0, 0),
+        Size = UDim2.new(0, 1, 1, 0),
         BorderSizePixel = 0,
         ZIndex = 6,
     })
@@ -1190,45 +1214,43 @@ function Velt:CreateWindow(config)
         Name = "TabList",
         Parent = sidebar,
         BackgroundTransparency = 1,
-        Position = UDim2.new(0, 8, 0, 8),
-        Size = UDim2.new(1, -16, 1, showCard and -64 or -16),
+        Position = UDim2.new(0, 8, 0, 10),
+        Size = UDim2.new(1, -16, 1, showCard and -74 or -20),
         CanvasSize = UDim2.new(0, 0, 0, 0),
         AutomaticCanvasSize = Enum.AutomaticSize.Y,
-        ScrollBarThickness = 2,
-        ScrollBarImageColor3 = theme.Accent,
-        ScrollBarImageTransparency = 0.7,
+        ScrollBarThickness = 0,
         ZIndex = 6,
         BorderSizePixel = 0,
     })
     Util.create("UIListLayout", {
         Parent = tabContainer,
         SortOrder = Enum.SortOrder.LayoutOrder,
-        Padding = UDim.new(0, 2),
+        Padding = UDim.new(0, 3),
     })
 
-    -- profile card: Roblox headshot + name
-    local profileBtn
+    local profileBtn, pName, pSub
     if showCard then
         profileBtn = Util.create("TextButton", {
             Name = "ProfileCard",
             Parent = sidebar,
             BackgroundColor3 = theme.Card,
-            Position = UDim2.new(0, 8, 1, -52),
-            Size = UDim2.new(1, -16, 0, 44),
+            Position = UDim2.new(0, 8, 1, -60),
+            Size = UDim2.new(1, -16, 0, 50),
             Text = "",
             AutoButtonColor = false,
             ZIndex = 7,
         })
         ThemeEngine:Bind(profileBtn, "BackgroundColor3", "Card")
-        Util.create("UICorner", { CornerRadius = theme.CornerSmall, Parent = profileBtn })
-        local pStroke = Util.create("UIStroke", { Color = theme.CardBorder, Thickness = 1, Transparency = 0.4, Parent = profileBtn })
+        Util.create("UICorner", { CornerRadius = UDim.new(0, 10), Parent = profileBtn })
+        local pStroke = Util.create("UIStroke", { Color = theme.CardBorder, Thickness = 1, Transparency = 0.45, Parent = profileBtn })
         ThemeEngine:Bind(pStroke, "Color", "CardBorder")
 
         local av = Util.create("ImageLabel", {
+            Name = "Avatar",
             Parent = profileBtn,
             BackgroundColor3 = theme.Surface,
-            Position = UDim2.new(0, 7, 0.5, 0),
-            Size = UDim2.new(0, 30, 0, 30),
+            Position = UDim2.new(0, 8, 0.5, 0),
+            Size = UDim2.new(0, 32, 0, 32),
             AnchorPoint = Vector2.new(0, 0.5),
             Image = LocalPlayer and ("rbxthumb://type=AvatarHeadShot&id=" .. LocalPlayer.UserId .. "&w=150&h=150") or "",
             ZIndex = 8,
@@ -1236,11 +1258,11 @@ function Velt:CreateWindow(config)
         ThemeEngine:Bind(av, "BackgroundColor3", "Surface")
         Util.create("UICorner", { CornerRadius = UDim.new(1, 0), Parent = av })
 
-        local pName = Util.create("TextLabel", {
+        pName = Util.create("TextLabel", {
             Parent = profileBtn,
             BackgroundTransparency = 1,
-            Position = UDim2.new(0, 44, 0, 6),
-            Size = UDim2.new(1, -50, 0, 16),
+            Position = UDim2.new(0, 48, 0, 9),
+            Size = UDim2.new(1, -54, 0, 16),
             Font = theme.FontBold,
             TextColor3 = theme.Text,
             TextSize = 12,
@@ -1250,36 +1272,164 @@ function Velt:CreateWindow(config)
             ZIndex = 8,
         })
         ThemeEngine:Bind(pName, "TextColor3", "Text")
-        local pSub = Util.create("TextLabel", {
+        pSub = Util.create("TextLabel", {
             Parent = profileBtn,
             BackgroundTransparency = 1,
-            Position = UDim2.new(0, 44, 0, 22),
-            Size = UDim2.new(1, -50, 0, 14),
+            Position = UDim2.new(0, 48, 0, 26),
+            Size = UDim2.new(1, -54, 0, 14),
             Font = Enum.Font.Gotham,
-            TextColor3 = theme.TextDark,
+            TextColor3 = theme.TextDim,
             TextSize = 10,
-            Text = cfgSys and "presets" or ("velt v" .. Velt.Version),
+            Text = tostring(config.ProfileSubtitle or (cfgSys and "tap for presets" or ("velt v" .. Velt.Version))),
             TextXAlignment = Enum.TextXAlignment.Left,
+            TextTruncate = Enum.TextTruncate.AtEnd,
             ZIndex = 8,
         })
         ThemeEngine:Bind(pSub, "TextColor3", "TextDim")
     end
 
+    ----------------------------------------------------------------
+    -- Content: page header (title + search) and pages
+    ----------------------------------------------------------------
     local contentArea = Util.create("Frame", {
         Name = "Content",
         Parent = mainFrame,
         BackgroundTransparency = 1,
-        Position = UDim2.new(0, 140, 0, 38),
-        Size = UDim2.new(1, -140, 1, -38),
+        Position = UDim2.new(0, 160, 0, TB),
+        Size = UDim2.new(1, -160, 1, -TB),
         ClipsDescendants = true,
         ZIndex = 5,
     })
 
+    local pageTitle = Util.create("TextLabel", {
+        Name = "PageTitle",
+        Parent = contentArea,
+        BackgroundTransparency = 1,
+        Position = UDim2.new(0, 16, 0, 0),
+        Size = UDim2.new(1, -170, 0, 48),
+        Font = theme.FontBold,
+        TextColor3 = theme.Text,
+        TextSize = 17,
+        Text = "",
+        TextXAlignment = Enum.TextXAlignment.Left,
+        TextTruncate = Enum.TextTruncate.AtEnd,
+        ZIndex = 6,
+    })
+    ThemeEngine:Bind(pageTitle, "TextColor3", "Text")
+
+    local searchFrame = Util.create("Frame", {
+        Name = "Search",
+        Parent = contentArea,
+        BackgroundColor3 = theme.Surface,
+        Position = UDim2.new(1, -12, 0, 8),
+        AnchorPoint = Vector2.new(1, 0),
+        Size = UDim2.new(0, 150, 0, 32),
+        ZIndex = 6,
+    })
+    ThemeEngine:Bind(searchFrame, "BackgroundColor3", "Surface")
+    Util.create("UICorner", { CornerRadius = UDim.new(0, 9), Parent = searchFrame })
+    local sStroke = Util.create("UIStroke", { Color = theme.CardBorder, Thickness = 1, Transparency = 0.5, Parent = searchFrame })
+    ThemeEngine:Bind(sStroke, "Color", "CardBorder")
+    local sIcon = makeIcon(searchFrame, "search", 15, "TextDim", 7, true, "?")
+    sIcon.Position = UDim2.new(0, 10, 0.5, -7)
+    local searchBox = Util.create("TextBox", {
+        Parent = searchFrame,
+        BackgroundTransparency = 1,
+        Position = UDim2.new(0, 32, 0, 0),
+        Size = UDim2.new(1, -38, 1, 0),
+        Font = theme.Font,
+        TextColor3 = theme.Text,
+        PlaceholderColor3 = theme.TextDark,
+        PlaceholderText = "Search...",
+        Text = "",
+        TextSize = 12,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        ClearTextOnFocus = false,
+        ZIndex = 7,
+    })
+    ThemeEngine:Bind(searchBox, "TextColor3", "Text")
+
+    local pagesArea = Util.create("Frame", {
+        Name = "Pages",
+        Parent = contentArea,
+        BackgroundTransparency = 1,
+        Position = UDim2.new(0, 0, 0, 48),
+        Size = UDim2.new(1, 0, 1, -48),
+        ClipsDescendants = true,
+        ZIndex = 5,
+    })
+
+    ----------------------------------------------------------------
+    -- Layout: rail / full sidebar, one / two columns
+    ----------------------------------------------------------------
+    local function placeSection(tabObj, sec, idx)
+        local col = (twoCol and idx % 2 == 0) and tabObj._colR or tabObj._colL
+        sec._card.Parent = col
+        sec._card.LayoutOrder = idx
+    end
+
+    local function layoutTab(tabObj)
+        if twoCol then
+            tabObj._colL.Size = UDim2.new(0.5, -5, 0, 0)
+            tabObj._colR.Size = UDim2.new(0.5, -5, 0, 0)
+            tabObj._colR.Position = UDim2.new(0.5, 5, 0, 0)
+            tabObj._colR.Visible = true
+        else
+            tabObj._colL.Size = UDim2.new(1, 0, 0, 0)
+            tabObj._colR.Visible = false
+        end
+        for i, sec in ipairs(tabObj._sections) do placeSection(tabObj, sec, i) end
+    end
+
+    local function layoutTabButton(tabObj)
+        if isRail then
+            tabObj._label.Visible = false
+            tabObj._icon.Position = UDim2.new(0.5, -9, 0.5, -9)
+        else
+            tabObj._label.Visible = true
+            tabObj._icon.Position = UDim2.new(0, 14, 0.5, -9)
+        end
+    end
+
     local function applyLayout()
-        local sw = (curW < 470) and 108 or 140
-        sidebar.Size = UDim2.new(0, sw, 1, -38)
-        contentArea.Position = UDim2.new(0, sw, 0, 38)
-        contentArea.Size = UDim2.new(1, -sw, 1, -38)
+        isRail = curW < 480
+        local sw = isRail and 58 or 168
+        local cw = curW - sw
+        twoCol = cw >= 600
+        sidebar.Size = UDim2.new(0, sw, 1, -TB)
+        contentArea.Position = UDim2.new(0, sw, 0, TB)
+        contentArea.Size = UDim2.new(1, -sw, 1, -TB)
+
+        local sWidth = math.clamp(math.floor(cw * 0.38), 110, 200)
+        searchFrame.Size = UDim2.new(0, sWidth, 0, 32)
+        pageTitle.Size = UDim2.new(1, -(sWidth + 32), 0, 48)
+
+        for _, g in ipairs(groupHeads) do
+            g.frame.Size = UDim2.new(1, 0, 0, isRail and 10 or 26)
+            g.text.Visible = not isRail
+            g.line.Visible = isRail
+        end
+        for _, tb in ipairs(tabs) do
+            layoutTabButton(tb)
+            layoutTab(tb)
+        end
+
+        if profileBtn then
+            local av = profileBtn:FindFirstChild("Avatar")
+            if isRail then
+                profileBtn.Position = UDim2.new(0, 7, 1, -54)
+                profileBtn.Size = UDim2.new(1, -14, 0, 44)
+                if av then av.Position = UDim2.new(0.5, -16, 0.5, 0) end
+                pName.Visible = false
+                pSub.Visible = false
+            else
+                profileBtn.Position = UDim2.new(0, 8, 1, -60)
+                profileBtn.Size = UDim2.new(1, -16, 0, 50)
+                if av then av.Position = UDim2.new(0, 8, 0.5, 0) end
+                pName.Visible = true
+                pSub.Visible = true
+            end
+        end
     end
     applyLayout()
 
@@ -1300,12 +1450,12 @@ function Velt:CreateWindow(config)
             Position = UDim2.fromOffset(c, c),
             AnchorPoint = Vector2.new(0.5, 0.5),
             Rotation = -45,
-            BackgroundColor3 = theme.TextDim,
+            BackgroundColor3 = theme.TextDark,
             BorderSizePixel = 0,
             ZIndex = 61,
         })
         Util.create("UICorner", { CornerRadius = UDim.new(1, 0), Parent = f })
-        ThemeEngine:Bind(f, "BackgroundColor3", "TextDim")
+        ThemeEngine:Bind(f, "BackgroundColor3", "TextDark")
     end
     gline(14, 17)
     gline(7, 22)
@@ -1345,29 +1495,61 @@ function Velt:CreateWindow(config)
     end
 
     ----------------------------------------------------------------
-    -- Tab selection
+    -- Search + tab selection
     ----------------------------------------------------------------
-    local tabs = {}
-    local activeTab = nil
+    local function applySearch(tabObj, q)
+        q = tostring(q or ""):lower()
+        for _, sec in ipairs(tabObj._sections) do
+            local any = false
+            local titleHit = (q ~= "") and (sec._title ~= "") and (sec._title:find(q, 1, true) ~= nil)
+            for _, it in ipairs(sec._items) do
+                local vis = (q == "") or titleHit or (it.text ~= "" and it.text:find(q, 1, true) ~= nil)
+                it.inst.Visible = vis
+                if vis then any = true end
+            end
+            sec._card.Visible = (q == "") or any or titleHit
+            if sec._body then sec._body.Visible = (q ~= "") or not sec._collapsed end
+        end
+    end
+
+    searchBox:GetPropertyChangedSignal("Text"):Connect(function()
+        if activeTab then applySearch(activeTab, searchBox.Text) end
+    end)
+
+    local function paintTab(tabObj, selected)
+        local th = T()
+        local iprop = tabObj._iconProp
+        if selected then
+            Util.tween(tabObj._btn, { BackgroundTransparency = 0.86 }, 0.2)
+            Util.tween(tabObj._indicator, { Size = UDim2.new(0, 3, 0, 18), BackgroundTransparency = 0 }, 0.2)
+            Util.tween(tabObj._icon, { [iprop] = th.Accent }, 0.15)
+            Util.tween(tabObj._label, { TextColor3 = th.Text }, 0.15)
+        else
+            Util.tween(tabObj._btn, { BackgroundTransparency = 1 }, 0.2)
+            Util.tween(tabObj._indicator, { Size = UDim2.new(0, 3, 0, 0), BackgroundTransparency = 1 }, 0.2)
+            Util.tween(tabObj._icon, { [iprop] = th.TextDim }, 0.15)
+            Util.tween(tabObj._label, { TextColor3 = th.TextDim }, 0.15)
+        end
+    end
 
     local function selectTab(tabObj)
         if activeTab == tabObj then return end
-        local th = T()
         if activeTab then
-            Util.tween(activeTab._btn, { BackgroundTransparency = 1 }, 0.2)
-            Util.tween(activeTab._indicator, { Size = UDim2.new(0, 3, 0, 0), BackgroundTransparency = 1 }, 0.2)
-            Util.tween(activeTab._icon, { TextColor3 = th.TextDim }, 0.15)
-            Util.tween(activeTab._label, { TextColor3 = th.TextDim }, 0.15)
+            paintTab(activeTab, false)
             activeTab._page.Visible = false
         end
         activeTab = tabObj
-        Util.tween(tabObj._btn, { BackgroundTransparency = 0.85 }, 0.2)
-        Util.tween(tabObj._indicator, { Size = UDim2.new(0, 3, 0, 18), BackgroundTransparency = 0 }, 0.2)
-        Util.tween(tabObj._icon, { TextColor3 = th.Accent }, 0.15)
-        Util.tween(tabObj._label, { TextColor3 = th.Text }, 0.15)
+        paintTab(tabObj, true)
         tabObj._page.Visible = true
+        pageTitle.Text = tabObj._title
+        if searchBox.Text ~= "" then searchBox.Text = "" else applySearch(tabObj, "") end
     end
 
+    windowMaid:Add(ThemeEngine.Changed:Connect(function()
+        for _, tb in ipairs(tabs) do paintTab(tb, tb == activeTab) end
+    end))
+
+    ----------------------------------------------------------------
     ----------------------------------------------------------------
     -- Window object
     ----------------------------------------------------------------
@@ -1523,8 +1705,35 @@ function Velt:CreateWindow(config)
         if type(tabConfig) == "string" then tabConfig = { Title = tabConfig } end
         tabConfig = tabConfig or {}
         local tabTitle = tostring(tabConfig.Title or tabConfig.Name or "Tab")
-        local tabIcon  = tabConfig.Icon
         local order    = #tabs + 1
+        local group    = tabConfig.Group
+
+        -- optional group heading ("Main", "Other", ...) in the sidebar
+        if group and group ~= window._lastGroup then
+            window._lastGroup = group
+            window._seq = (window._seq or 0) + 1
+            local gf = Util.create("Frame", {
+                Parent = tabContainer, BackgroundTransparency = 1,
+                Size = UDim2.new(1, 0, 0, 26), LayoutOrder = window._seq, ZIndex = 7,
+            })
+            local gt = Util.create("TextLabel", {
+                Parent = gf, BackgroundTransparency = 1,
+                Position = UDim2.new(0, 10, 0, 0), Size = UDim2.new(1, -10, 1, -4),
+                Font = Enum.Font.GothamBold, TextSize = 10, TextColor3 = theme.TextDark,
+                Text = string.upper(tostring(group)),
+                TextXAlignment = Enum.TextXAlignment.Left, TextYAlignment = Enum.TextYAlignment.Bottom,
+                ZIndex = 8,
+            })
+            ThemeEngine:Bind(gt, "TextColor3", "TextDark")
+            local gl = Util.create("Frame", {
+                Parent = gf, BackgroundColor3 = theme.CardBorder, BackgroundTransparency = 0.3,
+                Position = UDim2.new(0, 6, 0.5, 0), Size = UDim2.new(1, -12, 0, 1),
+                BorderSizePixel = 0, Visible = false, ZIndex = 8,
+            })
+            ThemeEngine:Bind(gl, "BackgroundColor3", "CardBorder")
+            groupHeads[#groupHeads + 1] = { frame = gf, text = gt, line = gl }
+        end
+        window._seq = (window._seq or 0) + 1
 
         -- Tab button
         local tabBtn = Util.create("TextButton", {
@@ -1532,16 +1741,15 @@ function Velt:CreateWindow(config)
             Parent = tabContainer,
             BackgroundColor3 = theme.Accent,
             BackgroundTransparency = 1,
-            Size = UDim2.new(1, 0, 0, 34),
-            Font = Enum.Font.SourceSans,
+            Size = UDim2.new(1, 0, 0, 40),
             Text = "",
             AutoButtonColor = false,
-            LayoutOrder = order,
+            LayoutOrder = window._seq,
             ZIndex = 7,
         })
-        Util.create("UICorner", { CornerRadius = theme.CornerSmall, Parent = tabBtn })
+        ThemeEngine:Bind(tabBtn, "BackgroundColor3", "Accent")
+        Util.create("UICorner", { CornerRadius = UDim.new(0, 10), Parent = tabBtn })
 
-        -- Active indicator bar
         local indicator = Util.create("Frame", {
             Parent = tabBtn,
             BackgroundColor3 = theme.Accent,
@@ -1555,38 +1763,27 @@ function Velt:CreateWindow(config)
         ThemeEngine:Bind(indicator, "BackgroundColor3", "Accent")
         Util.create("UICorner", { CornerRadius = UDim.new(0, 2), Parent = indicator })
 
-        -- Icon
-        local iconLabel = Util.create("TextLabel", {
-            Parent = tabBtn,
-            BackgroundTransparency = 1,
-            Position = UDim2.new(0, 14, 0, 0),
-            Size = UDim2.new(0, 20, 1, 0),
-            Font = Enum.Font.GothamBold,
-            TextColor3 = theme.TextDim,
-            TextSize = 14,
-            Text = getIcon(tabIcon, tabTitle),
-            ZIndex = 8,
-        })
+        local iconInst, iconProp = makeIcon(tabBtn, pickIcon(tabConfig.Icon, tabTitle), 18, "TextDim", 8, false, tabTitle)
+        iconInst.Position = UDim2.new(0, 14, 0.5, -9)
 
-        -- Label
         local tabLabel = Util.create("TextLabel", {
             Parent = tabBtn,
             BackgroundTransparency = 1,
-            Position = UDim2.new(0, 38, 0, 0),
-            Size = UDim2.new(1, -46, 1, 0),
+            Position = UDim2.new(0, 44, 0, 0),
+            Size = UDim2.new(1, -52, 1, 0),
             Font = theme.Font,
             TextColor3 = theme.TextDim,
-            TextSize = 12,
+            TextSize = 13,
             Text = tabTitle,
             TextXAlignment = Enum.TextXAlignment.Left,
             TextTruncate = Enum.TextTruncate.AtEnd,
             ZIndex = 8,
         })
 
-        -- Content page
+        -- Content page: two columns (the right one is only used on wide windows)
         local page = Util.create("ScrollingFrame", {
             Name = "Page_" .. tabTitle,
-            Parent = contentArea,
+            Parent = pagesArea,
             BackgroundTransparency = 1,
             Size = UDim2.new(1, 0, 1, 0),
             CanvasSize = UDim2.new(0, 0, 0, 0),
@@ -1599,105 +1796,149 @@ function Velt:CreateWindow(config)
             BorderSizePixel = 0,
         })
         Util.create("UIPadding", {
-            PaddingTop = UDim.new(0, 10),
-            PaddingBottom = UDim.new(0, 10),
-            PaddingLeft = UDim.new(0, 12),
-            PaddingRight = UDim.new(0, 12),
+            PaddingTop = UDim.new(0, 2), PaddingBottom = UDim.new(0, 16),
+            PaddingLeft = UDim.new(0, 12), PaddingRight = UDim.new(0, 12),
             Parent = page,
         })
-        Util.create("UIListLayout", {
-            Parent = page,
-            SortOrder = Enum.SortOrder.LayoutOrder,
-            Padding = UDim.new(0, 10),
+        local holder = Util.create("Frame", {
+            Parent = page, BackgroundTransparency = 1,
+            Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, ZIndex = 5,
         })
+        local function makeCol()
+            local c = Util.create("Frame", {
+                Parent = holder, BackgroundTransparency = 1,
+                Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, ZIndex = 5,
+            })
+            Util.create("UIListLayout", { Parent = c, SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 10) })
+            return c
+        end
+        local colL, colR = makeCol(), makeCol()
+        colR.Visible = false
 
         local tabObj = {
             _btn = tabBtn,
             _indicator = indicator,
-            _icon = iconLabel,
+            _icon = iconInst,
+            _iconProp = iconProp,
             _label = tabLabel,
             _page = page,
+            _colL = colL,
+            _colR = colR,
+            _title = tabTitle,
             _order = order,
             _sections = {},
         }
 
-        -- hover effects
         tabBtn.MouseEnter:Connect(function()
-            if activeTab ~= tabObj then
-                Util.tween(tabBtn, { BackgroundTransparency = 0.9 }, 0.15)
-            end
+            if activeTab ~= tabObj then Util.tween(tabBtn, { BackgroundTransparency = 0.93 }, 0.15) end
         end)
         tabBtn.MouseLeave:Connect(function()
-            if activeTab ~= tabObj then
-                Util.tween(tabBtn, { BackgroundTransparency = 1 }, 0.15)
-            end
+            if activeTab ~= tabObj then Util.tween(tabBtn, { BackgroundTransparency = 1 }, 0.15) end
         end)
-        tabBtn.MouseButton1Click:Connect(function()
-            selectTab(tabObj)
-        end)
+        tabBtn.MouseButton1Click:Connect(function() selectTab(tabObj) end)
 
         ----------------------------------------------------------------
-        -- AddSection
+        -- AddSection: collapsible card with an optional header
         ----------------------------------------------------------------
         function tabObj:AddSection(secConfig)
             if type(secConfig) == "string" then secConfig = { Title = secConfig } end
             secConfig = secConfig or {}
-            local secTitle = secConfig.Title or "Section"
+            local secTitle = tostring(secConfig.Title or "")
             local secOrder = #self._sections + 1
 
-            local sectionFrame = Util.create("Frame", {
+            local card = Util.create("Frame", {
                 Name = "Section_" .. secTitle,
-                Parent = page,
+                Parent = self._colL,
                 BackgroundColor3 = theme.Card,
                 Size = UDim2.new(1, 0, 0, 0),
                 AutomaticSize = Enum.AutomaticSize.Y,
                 LayoutOrder = secOrder,
                 ZIndex = 6,
             })
-            ThemeEngine:Bind(sectionFrame, "BackgroundColor3", "Card")
-            Util.create("UICorner", { CornerRadius = theme.CornerRadius, Parent = sectionFrame })
-            Util.create("UIStroke", {
-                Color = theme.CardBorder,
-                Thickness = 1,
-                Transparency = 0.4,
-                Parent = sectionFrame,
-            })
-            Util.create("UIPadding", {
-                PaddingTop = UDim.new(0, 10),
-                PaddingBottom = UDim.new(0, 10),
-                PaddingLeft = UDim.new(0, 12),
-                PaddingRight = UDim.new(0, 12),
-                Parent = sectionFrame,
-            })
+            ThemeEngine:Bind(card, "BackgroundColor3", "Card")
+            Util.create("UICorner", { CornerRadius = theme.CornerRadius, Parent = card })
+            local cStroke = Util.create("UIStroke", { Color = theme.CardBorder, Thickness = 1, Transparency = 0.35, Parent = card })
+            ThemeEngine:Bind(cStroke, "Color", "CardBorder")
+            Util.create("UIListLayout", { Parent = card, SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 0) })
 
-            -- Section title
-            if secTitle ~= "" then
-                Util.create("TextLabel", {
-                    Parent = sectionFrame,
-                    BackgroundTransparency = 1,
-                    Size = UDim2.new(1, 0, 0, 20),
-                    Font = theme.FontBold,
-                    TextColor3 = theme.TextDim,
-                    TextSize = 11,
-                    Text = string.upper(secTitle),
-                    TextXAlignment = Enum.TextXAlignment.Left,
-                    LayoutOrder = 0,
-                    ZIndex = 7,
-                })
-            end
-
-            local elementLayout = Util.create("UIListLayout", {
-                Parent = sectionFrame,
-                SortOrder = Enum.SortOrder.LayoutOrder,
-                Padding = UDim.new(0, 4),
+            local body = Util.create("Frame", {
+                Name = "Body",
+                Parent = card,
+                BackgroundTransparency = 1,
+                Size = UDim2.new(1, 0, 0, 0),
+                AutomaticSize = Enum.AutomaticSize.Y,
+                LayoutOrder = 2,
+                ZIndex = 7,
             })
+            local bodyPad = Util.create("UIPadding", {
+                PaddingTop = UDim.new(0, 6), PaddingBottom = UDim.new(0, 10),
+                PaddingLeft = UDim.new(0, 14), PaddingRight = UDim.new(0, 14), Parent = body,
+            })
+            Util.create("UIListLayout", { Parent = body, SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 4) })
 
             local section = {}
-            section._frame = sectionFrame
+            local sectionFrame = body
+            section._frame = card
+            section._card = card
+            section._body = body
+            section._title = secTitle:lower()
+            section._items = {}
+            section._collapsed = secConfig.Collapsed == true
             section._elementCount = 0
+
+            if secTitle ~= "" then
+                local header = Util.create("TextButton", {
+                    Name = "Header",
+                    Parent = card,
+                    BackgroundTransparency = 1,
+                    Size = UDim2.new(1, 0, 0, 40),
+                    Text = "",
+                    AutoButtonColor = false,
+                    LayoutOrder = 1,
+                    ZIndex = 8,
+                })
+                local x0 = 14
+                if secConfig.Icon then
+                    local ic = makeIcon(header, pickIcon(secConfig.Icon, secTitle), 16, "Accent", 9, true, secTitle)
+                    ic.Position = UDim2.new(0, 14, 0.5, -8)
+                    x0 = 38
+                end
+                local ht = Util.create("TextLabel", {
+                    Parent = header,
+                    BackgroundTransparency = 1,
+                    Position = UDim2.new(0, x0, 0, 0),
+                    Size = UDim2.new(1, -(x0 + 40), 1, 0),
+                    Font = theme.FontBold,
+                    TextColor3 = theme.Text,
+                    TextSize = 13,
+                    Text = secTitle,
+                    TextXAlignment = Enum.TextXAlignment.Left,
+                    TextTruncate = Enum.TextTruncate.AtEnd,
+                    ZIndex = 9,
+                })
+                ThemeEngine:Bind(ht, "TextColor3", "Text")
+                local line = Util.create("Frame", {
+                    Parent = header, BackgroundColor3 = theme.CardBorder, BackgroundTransparency = 0.5,
+                    Position = UDim2.new(0, 14, 1, -1), Size = UDim2.new(1, -28, 0, 1), BorderSizePixel = 0, ZIndex = 9,
+                })
+                ThemeEngine:Bind(line, "BackgroundColor3", "CardBorder")
+                if secConfig.Collapsible ~= false then
+                    local chev = drawChevron(header, -22, 0, "TextDim", 9)
+                    chev.Rotation = section._collapsed and -90 or 0
+                    header.MouseButton1Click:Connect(function()
+                        section._collapsed = not section._collapsed
+                        body.Visible = not section._collapsed
+                        Util.tween(chev, { Rotation = section._collapsed and -90 or 0 }, 0.18)
+                    end)
+                end
+            else
+                bodyPad.PaddingTop = UDim.new(0, 8)
+            end
+            body.Visible = not section._collapsed
 
             self._sections[secOrder] = section
             self._cur = section
+            placeSection(self, section, secOrder)
 
             ----------------------------------------------------------------
             -- AddToggle
@@ -1709,94 +1950,92 @@ function Velt:CreateWindow(config)
                 local callback = cfg.Callback or function() end
                 local changed = Signal.new()
 
-                local row = Util.create("Frame", {
+                -- the whole row is the tap target (phone friendly)
+                local row = Util.create("TextButton", {
                     Parent = sectionFrame,
                     BackgroundTransparency = 1,
-                    Size = UDim2.new(1, 0, 0, 32),
+                    Size = UDim2.new(1, 0, 0, 0),
+                    AutomaticSize = Enum.AutomaticSize.Y,
+                    Text = "",
+                    AutoButtonColor = false,
                     LayoutOrder = section._elementCount,
-                    ZIndex = 7,
-                })
-
-                Util.create("TextLabel", {
-                    Parent = row,
-                    BackgroundTransparency = 1,
-                    Size = UDim2.new(1, -56, 1, 0),
-                    Font = theme.Font,
-                    TextColor3 = theme.Text,
-                    TextSize = 13,
-                    Text = cfg.Title or "Toggle",
-                    TextXAlignment = Enum.TextXAlignment.Left,
                     ZIndex = 8,
                 })
-
+                local holder = Util.create("Frame", {
+                    Parent = row, BackgroundTransparency = 1,
+                    Size = UDim2.new(1, -54, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, ZIndex = 8,
+                })
+                Util.create("UIPadding", { PaddingTop = UDim.new(0, 8), PaddingBottom = UDim.new(0, 8), Parent = holder })
+                Util.create("UIListLayout", { Parent = holder, SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 2) })
+                local tl = Util.create("TextLabel", {
+                    Parent = holder, BackgroundTransparency = 1,
+                    Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
+                    Font = theme.Font, TextColor3 = theme.Text, TextSize = 13,
+                    Text = cfg.Title or "Toggle", TextWrapped = true,
+                    TextXAlignment = Enum.TextXAlignment.Left, LayoutOrder = 1, ZIndex = 9,
+                })
+                ThemeEngine:Bind(tl, "TextColor3", "Text")
                 if cfg.Description then
-                    Util.create("TextLabel", {
-                        Parent = row,
-                        BackgroundTransparency = 1,
-                        Position = UDim2.new(0, 0, 0, 16),
-                        Size = UDim2.new(1, -56, 0, 14),
-                        Font = theme.FontLight,
-                        TextColor3 = theme.TextDim,
-                        TextSize = 10,
-                        Text = cfg.Description,
-                        TextXAlignment = Enum.TextXAlignment.Left,
-                        ZIndex = 8,
+                    local dl = Util.create("TextLabel", {
+                        Parent = holder, BackgroundTransparency = 1,
+                        Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
+                        Font = theme.FontLight, TextColor3 = theme.TextDim, TextSize = 11,
+                        Text = cfg.Description, TextWrapped = true,
+                        TextXAlignment = Enum.TextXAlignment.Left, LayoutOrder = 2, ZIndex = 9,
                     })
-                    row.Size = UDim2.new(1, 0, 0, 40)
+                    ThemeEngine:Bind(dl, "TextColor3", "TextDim")
                 end
 
-                -- Toggle switch
-                local track = Util.create("TextButton", {
+                local track = Util.create("Frame", {
                     Parent = row,
                     BackgroundColor3 = value and theme.Accent or theme.ToggleOff,
-                    Position = UDim2.new(1, -44, 0.5, 0),
-                    Size = UDim2.new(0, 44, 0, 22),
-                    AnchorPoint = Vector2.new(0, 0.5),
-                    AutoButtonColor = false,
-                    Text = "",
-                    ZIndex = 8,
+                    Position = UDim2.new(1, 0, 0.5, 0),
+                    Size = UDim2.new(0, 40, 0, 22),
+                    AnchorPoint = Vector2.new(1, 0.5),
+                    ZIndex = 9,
                 })
                 Util.create("UICorner", { CornerRadius = UDim.new(1, 0), Parent = track })
-
                 local knob = Util.create("Frame", {
                     Parent = track,
-                    BackgroundColor3 = Color3.new(1, 1, 1),
+                    BackgroundColor3 = value and (theme.OnAccent or Color3.new(1, 1, 1)) or theme.TextDim,
                     Size = UDim2.new(0, 16, 0, 16),
                     Position = value and UDim2.new(1, -19, 0.5, 0) or UDim2.new(0, 3, 0.5, 0),
                     AnchorPoint = Vector2.new(0, 0.5),
-                    ZIndex = 9,
+                    ZIndex = 10,
                 })
                 Util.create("UICorner", { CornerRadius = UDim.new(1, 0), Parent = knob })
 
+                local function paint(animate)
+                    local th = T()
+                    local d = animate and 0.18 or 0
+                    Util.tween(track, { BackgroundColor3 = value and th.Accent or th.ToggleOff }, d)
+                    Util.tween(knob, {
+                        Position = value and UDim2.new(1, -19, 0.5, 0) or UDim2.new(0, 3, 0.5, 0),
+                        BackgroundColor3 = value and (th.OnAccent or Color3.new(1, 1, 1)) or th.TextDim,
+                    }, d, Enum.EasingStyle.Quart)
+                end
+
                 local function updateToggle(v, skipCb)
-                    value = v
-                    Util.tween(track, { BackgroundColor3 = v and theme.Accent or theme.ToggleOff }, 0.2)
-                    Util.tween(knob, { Position = v and UDim2.new(1, -19, 0.5, 0) or UDim2.new(0, 3, 0.5, 0) }, 0.2, Enum.EasingStyle.Back)
+                    value = v and true or false
+                    paint(true)
                     if not skipCb then
-                        pcall(callback, v)
-                        changed:Fire(v)
+                        pcall(callback, value)
+                        changed:Fire(value)
                     end
                 end
 
-                track.MouseButton1Click:Connect(function()
-                    updateToggle(not value)
-                end)
+                row.MouseButton1Click:Connect(function() updateToggle(not value) end)
 
                 local toggle = {}
                 function toggle:Set(v) updateToggle(v) end
                 function toggle:Get() return value end
+                function toggle:SetTitle(t) tl.Text = tostring(t) end
                 toggle.OnChanged = changed
 
-                -- config flag
                 if cfg.Flag and cfgSys then
                     cfgSys:RegisterFlag(cfg.Flag, changed, function() return value end, function(v, fire) updateToggle(v, not fire) end, "toggle")
                 end
-
-                -- theme update
-                ThemeEngine.Changed:Connect(function(t)
-                    Util.tween(track, { BackgroundColor3 = value and t.Accent or t.ToggleOff }, 0.3)
-                end)
-
+                windowMaid:Add(ThemeEngine.Changed:Connect(function() paint(true) end))
                 return toggle
             end
 
@@ -1817,116 +2056,94 @@ function Velt:CreateWindow(config)
                 local row = Util.create("Frame", {
                     Parent = sectionFrame,
                     BackgroundTransparency = 1,
-                    Size = UDim2.new(1, 0, 0, 46),
+                    Size = UDim2.new(1, 0, 0, 54),
                     LayoutOrder = section._elementCount,
-                    ZIndex = 7,
-                })
-
-                Util.create("TextLabel", {
-                    Parent = row,
-                    BackgroundTransparency = 1,
-                    Size = UDim2.new(0.6, 0, 0, 18),
-                    Font = theme.Font,
-                    TextColor3 = theme.Text,
-                    TextSize = 13,
-                    Text = cfg.Title or "Slider",
-                    TextXAlignment = Enum.TextXAlignment.Left,
                     ZIndex = 8,
                 })
+                local tl = Util.create("TextLabel", {
+                    Parent = row, BackgroundTransparency = 1,
+                    Position = UDim2.new(0, 0, 0, 6), Size = UDim2.new(1, -70, 0, 20),
+                    Font = theme.Font, TextColor3 = theme.Text, TextSize = 13,
+                    Text = cfg.Title or "Slider", TextXAlignment = Enum.TextXAlignment.Left,
+                    TextTruncate = Enum.TextTruncate.AtEnd, ZIndex = 9,
+                })
+                ThemeEngine:Bind(tl, "TextColor3", "Text")
 
+                local valueBox = Util.create("Frame", {
+                    Parent = row, BackgroundColor3 = theme.Surface,
+                    Position = UDim2.new(1, 0, 0, 5), AnchorPoint = Vector2.new(1, 0),
+                    Size = UDim2.new(0, 0, 0, 22), AutomaticSize = Enum.AutomaticSize.X, ZIndex = 9,
+                })
+                ThemeEngine:Bind(valueBox, "BackgroundColor3", "Surface")
+                Util.create("UICorner", { CornerRadius = UDim.new(0, 7), Parent = valueBox })
+                local vbs = Util.create("UIStroke", { Color = theme.CardBorder, Thickness = 1, Transparency = 0.5, Parent = valueBox })
+                ThemeEngine:Bind(vbs, "Color", "CardBorder")
+                Util.create("UIPadding", { PaddingLeft = UDim.new(0, 9), PaddingRight = UDim.new(0, 9), Parent = valueBox })
                 local valueLabel = Util.create("TextLabel", {
-                    Parent = row,
-                    BackgroundTransparency = 1,
-                    Position = UDim2.new(0.6, 0, 0, 0),
-                    Size = UDim2.new(0.4, 0, 0, 18),
-                    Font = theme.Font,
-                    TextColor3 = theme.Accent,
-                    TextSize = 12,
-                    Text = tostring(Util.round(value, 2)) .. suffix,
-                    TextXAlignment = Enum.TextXAlignment.Right,
-                    ZIndex = 8,
+                    Parent = valueBox, BackgroundTransparency = 1,
+                    Size = UDim2.new(0, 0, 1, 0), AutomaticSize = Enum.AutomaticSize.X,
+                    Font = theme.FontBold, TextColor3 = theme.Accent, TextSize = 12,
+                    Text = tostring(Util.round(value, 2)) .. suffix, ZIndex = 10,
                 })
                 ThemeEngine:Bind(valueLabel, "TextColor3", "Accent")
 
-                -- Track
                 local trackFrame = Util.create("Frame", {
-                    Parent = row,
-                    BackgroundColor3 = theme.SliderTrack,
-                    Position = UDim2.new(0, 0, 0, 26),
-                    Size = UDim2.new(1, 0, 0, 6),
-                    ZIndex = 8,
+                    Parent = row, BackgroundColor3 = theme.SliderTrack,
+                    Position = UDim2.new(0, 0, 0, 38), Size = UDim2.new(1, 0, 0, 6), ZIndex = 9,
                 })
                 ThemeEngine:Bind(trackFrame, "BackgroundColor3", "SliderTrack")
                 Util.create("UICorner", { CornerRadius = UDim.new(1, 0), Parent = trackFrame })
-
-                -- Fill
-                local pct = (value - min) / (max - min)
+                local p0 = (max > min) and ((value - min) / (max - min)) or 0
                 local fillFrame = Util.create("Frame", {
-                    Parent = trackFrame,
-                    BackgroundColor3 = theme.Accent,
-                    Size = UDim2.new(pct, 0, 1, 0),
-                    ZIndex = 9,
+                    Parent = trackFrame, BackgroundColor3 = theme.Accent,
+                    Size = UDim2.new(p0, 0, 1, 0), ZIndex = 10,
                 })
                 ThemeEngine:Bind(fillFrame, "BackgroundColor3", "Accent")
                 Util.create("UICorner", { CornerRadius = UDim.new(1, 0), Parent = fillFrame })
-
-                -- Gradient on fill
-                Util.create("UIGradient", {
-                    Parent = fillFrame,
-                    Color = theme.AccentGradient,
-                })
-
-                -- Knob
                 local sliderKnob = Util.create("Frame", {
-                    Parent = trackFrame,
-                    BackgroundColor3 = Color3.new(1, 1, 1),
-                    Size = UDim2.new(0, 14, 0, 14),
-                    Position = UDim2.new(pct, 0, 0.5, 0),
-                    AnchorPoint = Vector2.new(0.5, 0.5),
-                    ZIndex = 10,
+                    Parent = trackFrame, BackgroundColor3 = Color3.new(1, 1, 1),
+                    Size = UDim2.new(0, 16, 0, 16), Position = UDim2.new(p0, 0, 0.5, 0),
+                    AnchorPoint = Vector2.new(0.5, 0.5), ZIndex = 11,
                 })
                 Util.create("UICorner", { CornerRadius = UDim.new(1, 0), Parent = sliderKnob })
+                local ks = Util.create("UIStroke", { Color = theme.Accent, Thickness = 2, Transparency = 0.15, Parent = sliderKnob })
+                ThemeEngine:Bind(ks, "Color", "Accent")
 
-                -- Knob glow
-                Util.create("UIStroke", {
-                    Parent = sliderKnob,
-                    Color = theme.Accent,
-                    Thickness = 2,
-                    Transparency = 0.5,
+                -- generous invisible hit area around the thin track
+                local hit = Util.create("TextButton", {
+                    Parent = row, BackgroundTransparency = 1, Text = "",
+                    Position = UDim2.new(0, -6, 0, 28), Size = UDim2.new(1, 12, 0, 26), ZIndex = 12,
                 })
-
                 local sliding = false
-
+                local function render()
+                    local p = (max > min) and ((value - min) / (max - min)) or 0
+                    fillFrame.Size = UDim2.new(p, 0, 1, 0)
+                    sliderKnob.Position = UDim2.new(p, 0, 0.5, 0)
+                    valueLabel.Text = tostring(Util.round(value, 2)) .. suffix
+                end
                 local function updateSlider(input)
                     local absPos = trackFrame.AbsolutePosition.X
-                    local absSize = trackFrame.AbsoluteSize.X
+                    local absSize = math.max(1, trackFrame.AbsoluteSize.X)
                     local relX = Util.clamp((input.Position.X - absPos) / absSize, 0, 1)
                     local raw = min + (max - min) * relX
-                    -- snap to increment
                     value = Util.clamp(Util.round(raw / increment) * increment, min, max)
-                    local newPct = (value - min) / (max - min)
-                    fillFrame.Size = UDim2.new(newPct, 0, 1, 0)
-                    sliderKnob.Position = UDim2.new(newPct, 0, 0.5, 0)
-                    valueLabel.Text = tostring(Util.round(value, 2)) .. suffix
+                    render()
                     pcall(callback, value)
                     changed:Fire(value)
                 end
-
-                trackFrame.InputBegan:Connect(function(input)
+                hit.InputBegan:Connect(function(input)
                     if input.UserInputType == Enum.UserInputType.MouseButton1
                         or input.UserInputType == Enum.UserInputType.Touch then
                         sliding = true
                         updateSlider(input)
                     end
                 end)
-
                 windowMaid:Add(UserInput.InputChanged:Connect(function(input)
                     if sliding and (input.UserInputType == Enum.UserInputType.MouseMovement
                         or input.UserInputType == Enum.UserInputType.Touch) then
                         updateSlider(input)
                     end
                 end))
-
                 windowMaid:Add(UserInput.InputEnded:Connect(function(input)
                     if input.UserInputType == Enum.UserInputType.MouseButton1
                         or input.UserInputType == Enum.UserInputType.Touch then
@@ -1937,10 +2154,7 @@ function Velt:CreateWindow(config)
                 local slider = {}
                 function slider:Set(v)
                     value = Util.clamp(v, min, max)
-                    local p = (value - min) / (max - min)
-                    fillFrame.Size = UDim2.new(p, 0, 1, 0)
-                    sliderKnob.Position = UDim2.new(p, 0, 0.5, 0)
-                    valueLabel.Text = tostring(Util.round(value, 2)) .. suffix
+                    render()
                 end
                 function slider:Get() return value end
                 slider.OnChanged = changed
@@ -1948,55 +2162,115 @@ function Velt:CreateWindow(config)
                 if cfg.Flag and cfgSys then
                     cfgSys:RegisterFlag(cfg.Flag, changed, function() return value end, function(v, fire) if type(v) == "number" then slider:Set(v); if fire then pcall(callback, value) end end end)
                 end
-
                 return slider
             end
 
             ----------------------------------------------------------------
-            -- AddButton
+            -- AddButton   (Style = "Default" | "Primary" | "Danger")
             ----------------------------------------------------------------
             function section:AddButton(cfg)
                 cfg = cfg or {}
                 section._elementCount = section._elementCount + 1
                 local callback = cfg.Callback or function() end
+                local style = cfg.Style or "Default"
+                local bgKey = (style == "Primary") and "Accent" or "Surface"
+                local hoverKey = (style == "Primary") and "AccentHover" or "SurfaceHover"
+                local txtKey = (style == "Primary") and "OnAccent" or ((style == "Danger") and "Error" or "Text")
 
                 local btn = Util.create("TextButton", {
                     Parent = sectionFrame,
-                    BackgroundColor3 = theme.Accent,
-                    Size = UDim2.new(1, 0, 0, 34),
-                    Font = theme.FontBold,
-                    TextColor3 = Color3.new(1, 1, 1),
-                    TextSize = 13,
-                    Text = cfg.Title or "Button",
+                    BackgroundColor3 = theme[bgKey],
+                    Size = UDim2.new(1, 0, 0, 38),
+                    Text = "",
                     AutoButtonColor = false,
                     LayoutOrder = section._elementCount,
+                    ClipsDescendants = true,
                     ZIndex = 8,
                 })
-                ThemeEngine:Bind(btn, "BackgroundColor3", "Accent")
-                ThemeEngine:Bind(btn, "TextColor3", "OnAccent", function(v) return v or Color3.new(1, 1, 1) end)
-                Util.create("UICorner", { CornerRadius = theme.CornerSmall, Parent = btn })
-
-                -- Gradient overlay
-                Util.create("UIGradient", {
-                    Parent = btn,
-                    Color = theme.AccentGradient,
-                    Rotation = 90,
+                ThemeEngine:Bind(btn, "BackgroundColor3", bgKey)
+                Util.create("UICorner", { CornerRadius = UDim.new(0, 9), Parent = btn })
+                local bs = Util.create("UIStroke", {
+                    Color = (style == "Danger") and theme.Error or theme.CardBorder,
+                    Thickness = 1, Transparency = (style == "Primary") and 1 or 0.45, Parent = btn,
                 })
+                ThemeEngine:Bind(bs, "Color", (style == "Danger") and "Error" or "CardBorder")
 
-                btn.MouseEnter:Connect(function()
-                    Util.tween(btn, { BackgroundColor3 = theme.AccentHover }, 0.15)
-                end)
-                btn.MouseLeave:Connect(function()
-                    Util.tween(btn, { BackgroundColor3 = theme.Accent }, 0.15)
-                end)
+                local lbl = Util.create("TextLabel", {
+                    Parent = btn, BackgroundTransparency = 1,
+                    Position = UDim2.new(0, 14, 0, 0), Size = UDim2.new(1, -44, 1, 0),
+                    Font = theme.FontBold, TextSize = 13,
+                    TextColor3 = theme[txtKey] or Color3.new(1, 1, 1),
+                    Text = cfg.Title or "Button", TextXAlignment = Enum.TextXAlignment.Left,
+                    TextTruncate = Enum.TextTruncate.AtEnd, ZIndex = 9,
+                })
+                ThemeEngine:Bind(lbl, "TextColor3", txtKey, function(v) return v or Color3.new(1, 1, 1) end)
+                local chev = drawChevron(btn, -20, 0, (style == "Primary") and "OnAccent" or "TextDim", 9)
+                chev.Rotation = -90
+
+                btn.MouseEnter:Connect(function() Util.tween(btn, { BackgroundColor3 = T()[hoverKey] }, 0.15) end)
+                btn.MouseLeave:Connect(function() Util.tween(btn, { BackgroundColor3 = T()[bgKey] }, 0.15) end)
                 btn.MouseButton1Click:Connect(function()
                     createRipple(btn, nil)
                     pcall(callback)
                 end)
 
                 local button = {}
-                function button:SetTitle(t) btn.Text = t end
+                function button:SetTitle(t) lbl.Text = tostring(t) end
                 return button
+            end
+
+            ----------------------------------------------------------------
+            -- AddStats: grid of value/label tiles   (Items = {{Id=,Value=,Label=}}, Columns = 3)
+            ----------------------------------------------------------------
+            function section:AddStats(cfg)
+                cfg = cfg or {}
+                section._elementCount = section._elementCount + 1
+                local items = cfg.Items or {}
+                local cols = math.max(1, cfg.Columns or 3)
+                local rows = math.max(1, math.ceil(#items / cols))
+                local cellH, gap = 52, 8
+
+                local grid = Util.create("Frame", {
+                    Parent = sectionFrame, BackgroundTransparency = 1,
+                    Size = UDim2.new(1, 0, 0, rows * cellH + (rows - 1) * gap + 6),
+                    LayoutOrder = section._elementCount, ZIndex = 8,
+                })
+                Util.create("UIPadding", { PaddingTop = UDim.new(0, 4), Parent = grid })
+                Util.create("UIGridLayout", {
+                    Parent = grid,
+                    CellSize = UDim2.new(1 / cols, -(cols - 1) * gap / cols, 0, cellH),
+                    CellPadding = UDim2.fromOffset(gap, gap),
+                    SortOrder = Enum.SortOrder.LayoutOrder,
+                })
+                local refs = {}
+                for i, it in ipairs(items) do
+                    local tile = Util.create("Frame", {
+                        Parent = grid, BackgroundColor3 = theme.Surface, LayoutOrder = i, ZIndex = 9,
+                    })
+                    ThemeEngine:Bind(tile, "BackgroundColor3", "Surface")
+                    Util.create("UICorner", { CornerRadius = UDim.new(0, 9), Parent = tile })
+                    local vl = Util.create("TextLabel", {
+                        Parent = tile, BackgroundTransparency = 1,
+                        Position = UDim2.new(0, 10, 0, 8), Size = UDim2.new(1, -20, 0, 20),
+                        Font = theme.FontBold, TextSize = 15, TextColor3 = theme.Text,
+                        Text = tostring(it.Value or "-"), TextXAlignment = Enum.TextXAlignment.Left,
+                        TextTruncate = Enum.TextTruncate.AtEnd, ZIndex = 10,
+                    })
+                    ThemeEngine:Bind(vl, "TextColor3", "Text")
+                    local ll = Util.create("TextLabel", {
+                        Parent = tile, BackgroundTransparency = 1,
+                        Position = UDim2.new(0, 10, 0, 29), Size = UDim2.new(1, -20, 0, 14),
+                        Font = theme.FontLight, TextSize = 10, TextColor3 = theme.TextDim,
+                        Text = tostring(it.Label or ""), TextXAlignment = Enum.TextXAlignment.Left,
+                        TextTruncate = Enum.TextTruncate.AtEnd, ZIndex = 10,
+                    })
+                    ThemeEngine:Bind(ll, "TextColor3", "TextDim")
+                    refs[it.Id or i] = { value = vl, label = ll }
+                end
+                local obj = {}
+                function obj:Set(id, v) local r = refs[id]; if r then r.value.Text = tostring(v) end end
+                function obj:SetLabel(id, t) local r = refs[id]; if r then r.label.Text = tostring(t) end end
+                return obj
             end
 
             ----------------------------------------------------------------
@@ -2096,7 +2370,7 @@ function Velt:CreateWindow(config)
                 local row = Util.create("Frame", {
                     Parent = sectionFrame,
                     BackgroundTransparency = 1,
-                    Size = UDim2.new(1, 0, 0, 50),
+                    Size = UDim2.new(1, 0, 0, 54),
                     LayoutOrder = section._elementCount,
                     ClipsDescendants = false,
                     ZIndex = 20 + section._elementCount,
@@ -2118,7 +2392,7 @@ function Velt:CreateWindow(config)
                     Parent = row,
                     BackgroundColor3 = theme.Surface,
                     Position = UDim2.new(0, 0, 0, 22),
-                    Size = UDim2.new(1, 0, 0, 28),
+                    Size = UDim2.new(1, 0, 0, 32),
                     Font = theme.Font,
                     TextColor3 = theme.TextDim,
                     TextSize = 12,
@@ -2136,14 +2410,14 @@ function Velt:CreateWindow(config)
                 local arrowLabel = {}
                 local function setArrow(open, h)
                     Util.tween(arrowHolder, { Rotation = open and 180 or 0 }, 0.18)
-                    row.Size = UDim2.new(1, 0, 0, open and (56 + (h or 0)) or 50)
+                    row.Size = UDim2.new(1, 0, 0, open and (64 + (h or 0)) or 54)
                 end
 
                 -- Dropdown list
                 local dropList = Util.create("Frame", {
                     Parent = row,
                     BackgroundColor3 = theme.Card,
-                    Position = UDim2.new(0, 0, 0, 52),
+                    Position = UDim2.new(0, 0, 0, 58),
                     Size = UDim2.new(1, 0, 0, 0),
                     ClipsDescendants = true,
                     Visible = false,
@@ -2852,6 +3126,28 @@ function Velt:CreateWindow(config)
                 return bar
             end
 
+            -- register elements for the page search
+            for _, m in ipairs({ "AddToggle", "AddSlider", "AddDropdown", "AddButton", "AddInput", "AddKeybind",
+                                 "AddColorPicker", "AddLabel", "AddParagraph", "AddText", "AddDivider",
+                                 "AddProgressbar", "AddStats" }) do
+                local orig = section[m]
+                if orig then
+                    section[m] = function(self2, cfg2)
+                        local el = orig(self2, cfg2)
+                        local inst
+                        for _, c in ipairs(body:GetChildren()) do
+                            if c:IsA("GuiObject") and c.LayoutOrder == section._elementCount then inst = c end
+                        end
+                        if inst then
+                            local c2 = type(cfg2) == "table" and cfg2 or {}
+                            local txt = string.lower(tostring(c2.Title or c2.Name or c2.Text or "") .. " " .. tostring(c2.Description or c2.Content or ""))
+                            section._items[#section._items + 1] = { inst = inst, text = (m == "AddDivider") and "" or txt }
+                        end
+                        return el
+                    end
+                end
+            end
+
             return section
         end
 
@@ -2863,11 +3159,12 @@ function Velt:CreateWindow(config)
         function tabObj:Select() selectTab(tabObj) end
 
         function tabObj:Clear()
-            for _, c in ipairs(page:GetChildren()) do
-                if c:IsA("GuiObject") then c:Destroy() end
+            for _, sec in ipairs(self._sections) do
+                if sec._card then sec._card:Destroy() end
             end
             self._sections = {}
             self._cur = nil
+            if activeTab == self and searchBox.Text ~= "" then searchBox.Text = "" end
         end
 
         local function norm(o)
@@ -2887,7 +3184,7 @@ function Velt:CreateWindow(config)
         local flagged = { AddToggle = true, AddSlider = true, AddDropdown = true,
                           AddInput = true, AddKeybind = true, AddColorPicker = true }
         for _, m in ipairs({ "AddToggle", "AddSlider", "AddDropdown", "AddButton", "AddInput",
-                             "AddKeybind", "AddColorPicker", "AddParagraph", "AddProgressbar", "AddText" }) do
+                             "AddKeybind", "AddColorPicker", "AddParagraph", "AddProgressbar", "AddText", "AddStats" }) do
             tabObj[m] = function(self, o)
                 o = norm(o)
                 if flagged[m] and cfgSys and o.Flag == nil and not o.NoSave then
@@ -2906,8 +3203,7 @@ function Velt:CreateWindow(config)
         function tabObj:AddLabel(o)
             if type(o) == "table" then o = o.Title or o.Text or o.Name end
             local sec = curSection(self)
-            local t = sec:AddText({ Text = tostring(o or "") })
-            return t
+            return sec:AddText({ Text = tostring(o or "") })
         end
         function tabObj:AddDivider()
             local sec = curSection(self)
@@ -2915,6 +3211,8 @@ function Velt:CreateWindow(config)
         end
 
         tabs[#tabs + 1] = tabObj
+        layoutTabButton(tabObj)
+        layoutTab(tabObj)
 
         -- auto-select first tab
         if #tabs == 1 then
@@ -2927,7 +3225,10 @@ function Velt:CreateWindow(config)
     ----------------------------------------------------------------
     -- Window Methods
     ----------------------------------------------------------------
+    window._themeName = themeName
     function window:SetTheme(name)
+        if type(name) == "string" and not Themes[name] then return end
+        if type(name) == "string" then window._themeName = name end
         ThemeEngine:Apply(name, true)
     end
 
@@ -2988,7 +3289,14 @@ function Velt:CreateWindow(config)
             s:AddText({ Text = "Config saving is off for this script (SaveConfig = false)." })
             return configTab
         end
-        local sec = configTab:AddSection({ Title = "Presets" })
+        do
+            local names = Velt:GetThemes()
+            table.sort(names)
+            local ap = configTab:AddSection({ Title = "Appearance", Icon = "sparkles" })
+            ap:AddDropdown({ Title = "Theme", Options = names, Default = window._themeName,
+                Callback = function(v) window:SetTheme(v) end })
+        end
+        local sec = configTab:AddSection({ Title = "Presets", Icon = "save" })
         local typed, picked = "", nil
         local dd
         local function refresh()
