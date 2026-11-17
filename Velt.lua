@@ -1394,6 +1394,3 @@ Velt.CreateWindow = newWindow
 Velt.Splash       = newSplash
 Velt.SetAccent    = setAccent
 return setmetatable({}, Velt)
-end
-
-return setmetatable({}, Velt)
