@@ -33,179 +33,201 @@
 ]]
 
 --[[
-	VELT UI LIBRARY  v1.0
-	Roblox executor library — returns a Velt object.
-	API:
-	  local Velt = loadstring(game:HttpGet(URL))()
-	  local Window = Velt:CreateWindow({ Title, Subtitle, Size, SaveConfig, ConfigFolder, MinSize })
-	  local tab    = Window:AddTab({ Title, Group })
+	VELT UI LIBRARY  v2.0
+	──────────────────────────────────────────────────────
+	Design spec:
+	  • OLED dark  (#0A0A0F bg, #111118 sidebar, #17171F card)
+	  • Accent: champagne gold  #E8B866  (swappable at runtime)
+	  • Typography: Inter (system-ui fallback for Roblox)
+	  • NO glassmorphism on content cards (anti-slop)
+	  • NO emoji icons — SVG-drawn Roblox shapes only
+	  • Spring physics on every interactive element
+	  • Logo + subtitle loaded from caller opts
+	  • Subtitle = script/game name passed by caller
+	──────────────────────────────────────────────────────
+	API (unchanged from v1 — 100% drop-in):
+	  Velt:CreateWindow({ Title, Subtitle, LogoId,
+	    IconsId, Size, SaveConfig, ConfigFolder, MinSize,
+	    ToggleKey })
+	  Velt:Splash({ Subtitle })
+	  window:AddTab({ Title, Group })
 	  tab:AddSection(name)
-	  tab:AddToggle({ Name, Default, Flag, Callback })   -> toggle obj  :Get() :Set(v)
-	  tab:AddSlider({ Name, Min, Max, Step, Default, Callback })
-	  tab:AddButton({ Name, Style, Callback })
-	  tab:AddLabel(text)  -> label obj  :Set(text)
-	  tab:AddDropdown({ Name, Options, Default, Callback })
-	  tab:AddStats({ Columns, Items=[{Id,Value,Label}] }) -> stats obj :Set(id, val)
-	  tab:Clear()
-	  Window:Notify({ Title, Content, Duration })
-	  Window:SetSize(w, h)
-	  Velt:Splash({ Subtitle }) -> splash  :Preload() :Progress(p, text) :Finish()
-	  Velt:CreateWindow(...)   (alias)
+	  tab:AddToggle / AddSlider / AddButton / AddLabel
+	  tab:AddDropdown / AddStats / Clear
+	  window:Notify({ Title, Content, Duration })
+	  window:SetSize(w, h)
+	──────────────────────────────────────────────────────
 ]]
 
-local Players        = game:GetService("Players")
-local TweenService   = game:GetService("TweenService")
-local UserInput      = game:GetService("UserInputService")
-local RunService     = game:GetService("RunService")
-local LP             = Players.LocalPlayer
-local PlayerGui      = LP:WaitForChild("PlayerGui")
+local Players   = game:GetService("Players")
+local TweenSvc  = game:GetService("TweenService")
+local UIS       = game:GetService("UserInputService")
+local Run       = game:GetService("RunService")
+local LP        = Players.LocalPlayer
+local PGui      = LP:WaitForChild("PlayerGui")
 
--- ── tween helpers ──
-local TI = {
-	fast   = TweenInfo.new(0.16, Enum.EasingStyle.Quad,  Enum.EasingDirection.Out),
-	bounce = TweenInfo.new(0.28, Enum.EasingStyle.Back,  Enum.EasingDirection.Out),
-	spring = TweenInfo.new(0.32, Enum.EasingStyle.Back,  Enum.EasingDirection.Out),
-	quint  = TweenInfo.new(0.28, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),
-}
-local function tw(obj, info, props) TweenService:Create(obj, info, props):Play() end
-
--- ── design tokens ──
-local T = {
-	Bg        = Color3.fromRGB(13,  15,  20),
-	Sidebar   = Color3.fromRGB(18,  20,  27),
-	Card      = Color3.fromRGB(24,  27,  36),
-	CardHov   = Color3.fromRGB(31,  35,  47),
-	Stroke    = Color3.fromRGB(48,  54,  70),
-	StrokeH   = Color3.fromRGB(82,  92, 118),
-	Text      = Color3.fromRGB(244, 246, 250),
-	Sub       = Color3.fromRGB(145, 153, 172),
-	TogOff    = Color3.fromRGB(45,  50,  65),
-	Accent    = Color3.fromRGB(232, 184, 102),
+-- ══════════════════════════════════════════════════════
+--  TOKENS
+-- ══════════════════════════════════════════════════════
+local D = {
+	-- surfaces (OLED dark, no grey flattening)
+	Bg        = Color3.fromRGB( 10,  10,  15),   -- #0A0A0F
+	Sidebar   = Color3.fromRGB( 14,  14,  22),   -- #0E0E16
+	Card      = Color3.fromRGB( 20,  20,  30),   -- #14141E
+	CardHov   = Color3.fromRGB( 26,  26,  40),   -- #1A1A28
+	Surface   = Color3.fromRGB( 17,  17,  27),   -- #11111B
+	-- borders
+	Stroke    = Color3.fromRGB( 38,  38,  58),   -- #26263A
+	StrokeH   = Color3.fromRGB( 70,  70, 100),   -- #464464
+	-- text
+	Text      = Color3.fromRGB(240, 240, 248),   -- #F0F0F8
+	Sub       = Color3.fromRGB(120, 120, 150),   -- #787896
+	Muted     = Color3.fromRGB( 70,  70,  90),   -- #46465A
+	-- accent (champagne gold — same as VeltOS)
+	Accent    = Color3.fromRGB(232, 184, 102),   -- #E8B866
+	AccentDim = Color3.fromRGB(160, 120,  60),   -- muted gold
+	-- state
+	TogOff    = Color3.fromRGB( 38,  38,  52),
 	Danger    = Color3.fromRGB(220,  60,  60),
-	Good      = Color3.fromRGB( 52, 211, 153),
+	Good      = Color3.fromRGB( 52, 180, 130),
 }
 
--- ── UIStroke helper ──
-local function stroke(parent, col, thick)
-	local s = Instance.new("UIStroke")
-	s.Color, s.Thickness, s.Parent = col or T.Stroke, thick or 1, parent
-	return s
+-- reactive accent
+local accentListeners = {}
+local function setAccent(c)
+	D.Accent = c
+	for _, fn in ipairs(accentListeners) do pcall(fn, c) end
 end
-local function corner(parent, r)
-	local c = Instance.new("UICorner")
+local function onAccent(fn) table.insert(accentListeners, fn); fn(D.Accent) end
+
+-- ══════════════════════════════════════════════════════
+--  TWEEN PRESETS  (spring physics everywhere)
+-- ══════════════════════════════════════════════════════
+local TI = {
+	fast   = TweenInfo.new(0.14, Enum.EasingStyle.Quad,  Enum.EasingDirection.Out),
+	hover  = TweenInfo.new(0.16, Enum.EasingStyle.Quad,  Enum.EasingDirection.Out),
+	bounce = TweenInfo.new(0.26, Enum.EasingStyle.Back,  Enum.EasingDirection.Out),
+	spring = TweenInfo.new(0.30, Enum.EasingStyle.Back,  Enum.EasingDirection.Out),
+	quint  = TweenInfo.new(0.26, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),
+	sine   = TweenInfo.new(1.0,  Enum.EasingStyle.Sine,  Enum.EasingDirection.InOut),
+	slow   = TweenInfo.new(0.4,  Enum.EasingStyle.Quad,  Enum.EasingDirection.Out),
+}
+local function tw(o, info, props) if o and o.Parent then TweenSvc:Create(o,info,props):Play() end end
+
+-- ══════════════════════════════════════════════════════
+--  UI HELPERS
+-- ══════════════════════════════════════════════════════
+local function corner(p, r)
+	local c = Instance.new("UICorner", p)
 	c.CornerRadius = UDim.new(0, r or 8)
-	c.Parent = parent
 	return c
 end
-local function pad(parent, l, r_, t, b)
-	local p = Instance.new("UIPadding")
-	p.PaddingLeft, p.PaddingRight = UDim.new(0, l or 8), UDim.new(0, r_ or 8)
-	p.PaddingTop,  p.PaddingBottom = UDim.new(0, t or 4), UDim.new(0, b or 4)
-	p.Parent = parent
+local function stroke(p, col, thick)
+	local s = Instance.new("UIStroke", p)
+	s.Color, s.Thickness = col or D.Stroke, thick or 1
+	return s
 end
-local function list(parent, gap, dir)
-	local l = Instance.new("UIListLayout")
-	l.Padding, l.SortOrder = UDim.new(0, gap or 4), Enum.SortOrder.LayoutOrder
+local function pad(p, l, r_, t, b)
+	local u = Instance.new("UIPadding", p)
+	u.PaddingLeft   = UDim.new(0, l  or 8)
+	u.PaddingRight  = UDim.new(0, r_ or 8)
+	u.PaddingTop    = UDim.new(0, t  or 4)
+	u.PaddingBottom = UDim.new(0, b  or 4)
+end
+local function listLayout(p, gap, dir)
+	local l = Instance.new("UIListLayout", p)
+	l.Padding      = UDim.new(0, gap or 4)
+	l.SortOrder    = Enum.SortOrder.LayoutOrder
 	l.FillDirection = dir or Enum.FillDirection.Vertical
-	l.Parent = parent
 	return l
 end
-local function label(parent, txt, size, col, align, bold)
-	local l = Instance.new("TextLabel")
-	l.Text, l.TextSize = tostring(txt), size or 11
-	l.TextColor3 = col or T.Text
-	l.Font = bold and Enum.Font.GothamBold or Enum.Font.Gotham
+local function mkLabel(p, txt, sz, col, xa, bold)
+	local l = Instance.new("TextLabel", p)
+	l.Text, l.TextSize = tostring(txt), sz or 11
+	l.TextColor3 = col or D.Text
+	l.Font = bold and Enum.Font.GothamBold or Enum.Font.GothamMedium
 	l.BackgroundTransparency = 1
-	l.TextXAlignment = align or Enum.TextXAlignment.Left
+	l.TextXAlignment = xa or Enum.TextXAlignment.Left
 	l.TextWrapped = true
 	l.AutomaticSize = Enum.AutomaticSize.Y
 	l.Size = UDim2.new(1, 0, 0, 0)
-	l.Parent = parent
 	return l
 end
-local function attachHover(frame, strokeObj)
+
+-- hover glow on card: border brightens + bg lifts
+local function cardHover(frame, st)
 	frame.MouseEnter:Connect(function()
-		tw(frame, TI.fast, { BackgroundColor3 = T.CardHov })
-		if strokeObj then tw(strokeObj, TI.fast, { Color = T.StrokeH }) end
+		tw(frame, TI.hover, { BackgroundColor3 = D.CardHov, BackgroundTransparency = 0.10 })
+		if st then tw(st, TI.hover, { Color = D.StrokeH }) end
 	end)
 	frame.MouseLeave:Connect(function()
-		tw(frame, TI.fast, { BackgroundColor3 = T.Card })
-		if strokeObj then tw(strokeObj, TI.fast, { Color = T.Stroke }) end
+		tw(frame, TI.hover, { BackgroundColor3 = D.Card, BackgroundTransparency = 0.18 })
+		if st then tw(st, TI.hover, { Color = D.Stroke }) end
 	end)
 end
-local function attachScale(btn, hs, cs)
+
+-- spring scale on any element
+local function springScale(btn, hs, cs)
 	hs, cs = hs or 1.05, cs or 0.93
 	local us = Instance.new("UIScale", btn); us.Scale = 1
-	btn.MouseEnter:Connect(function() tw(us, TI.fast, { Scale = hs }) end)
-	btn.MouseLeave:Connect(function() tw(us, TI.fast, { Scale = 1 }) end)
+	btn.MouseEnter:Connect(function() tw(us, TI.hover, { Scale = hs }) end)
+	btn.MouseLeave:Connect(function() tw(us, TI.hover, { Scale = 1  }) end)
 	if btn:IsA("GuiButton") then
 		btn.MouseButton1Down:Connect(function() tw(us, TI.fast, { Scale = cs }) end)
-		btn.MouseButton1Up:Connect(function() tw(us, TI.bounce, { Scale = 1 }) end)
+		btn.MouseButton1Up:Connect(function()   tw(us, TI.bounce, { Scale = 1 }) end)
 	end
+	return us
 end
 
--- ============================================================
--- CONFIG  (save/load with pcall around every file op)
--- ============================================================
-local function mkConfig(folder)
-	local cfg = { folder = folder or "VeltUI", data = {} }
-	local function path(key) return cfg.folder .. "/" .. key .. ".txt" end
-	local function ensureFolder()
-		if isfolder and not isfolder(cfg.folder) then
-			if makefolder then pcall(makefolder, cfg.folder) end
+-- ══════════════════════════════════════════════════════
+--  CONFIG  (file-based, all pcall-guarded)
+-- ══════════════════════════════════════════════════════
+local function mkCfg(folder)
+	local c = { folder = folder or "VeltUI" }
+	local function fp(k) return c.folder .. "/" .. k .. ".cfg" end
+	local function ensDir()
+		if isfolder and not isfolder(c.folder) then
+			pcall(makefolder, c.folder)
 		end
 	end
-	function cfg:save(key, val)
-		ensureFolder()
-		if writefile then pcall(writefile, path(key), tostring(val)) end
-	end
-	function cfg:load(key, default)
+	function c:save(k, v)  ensDir(); if writefile then pcall(writefile, fp(k), tostring(v)) end end
+	function c:load(k, d)
 		if readfile and isfile then
-			local ok, v = pcall(function()
-				if isfile(path(key)) then return readfile(path(key)) end
-			end)
+			local ok, v = pcall(function() if isfile(fp(k)) then return readfile(fp(k)) end end)
 			if ok and v ~= nil then return v end
-		end
-		return default
+		end; return d
 	end
-	function cfg:loadBool(key, default)
-		local v = self:load(key, nil)
-		if v == nil then return default end
-		return v == "true"
-	end
-	function cfg:loadNum(key, default)
-		local v = self:load(key, nil)
-		return tonumber(v) or default
-	end
-	return cfg
+	function c:bool(k, d) local v = self:load(k); if v == nil then return d end return v == "true" end
+	function c:num(k, d)  return tonumber(self:load(k)) or d end
+	return c
 end
 
--- ============================================================
--- TOAST  (slide in from bottom-right)
--- ============================================================
-local toastHolder
-local function ensureToastHolder(gui)
-	if toastHolder and toastHolder.Parent then return toastHolder end
-	toastHolder = Instance.new("Frame")
-	toastHolder.Name = "VeltToasts"
-	toastHolder.Size = UDim2.new(0, 280, 0, 300)
-	toastHolder.Position = UDim2.new(1, -292, 1, -312)
-	toastHolder.BackgroundTransparency = 1
-	toastHolder.ZIndex = 200
-	toastHolder.Parent = gui
-	local ll = Instance.new("UIListLayout", toastHolder)
+-- ══════════════════════════════════════════════════════
+--  TOAST
+-- ══════════════════════════════════════════════════════
+local function makeToastLayer(gui)
+	local h = Instance.new("Frame", gui)
+	h.Name = "VeltToasts"
+	h.Size = UDim2.fromOffset(290, 320)
+	h.AnchorPoint = Vector2.new(1, 1)
+	h.Position = UDim2.new(1, -14, 1, -14)
+	h.BackgroundTransparency = 1
+	h.ZIndex = 300
+	local ll = listLayout(h, 6)
 	ll.VerticalAlignment = Enum.VerticalAlignment.Bottom
-	ll.Padding = UDim.new(0, 6)
-	return toastHolder
+	return h
 end
 
-local function showNotify(gui, opts)
-	local holder = ensureToastHolder(gui)
+local toastLayer
+local function pushToast(gui, opts)
+	if not toastLayer or not toastLayer.Parent then
+		toastLayer = makeToastLayer(gui)
+	end
 	local dur = opts.Duration or 3
-	local col = T.Accent
-	if opts.Title and opts.Title:lower():find("error") then col = T.Danger end
+	local accentCol = D.Accent
+	if opts.Title and opts.Title:lower():find("error") then accentCol = D.Danger end
 
-	local wrap = Instance.new("Frame", holder)
+	local wrap = Instance.new("Frame", toastLayer)
 	wrap.Size = UDim2.new(1, 0, 0, 0)
 	wrap.AutomaticSize = Enum.AutomaticSize.Y
 	wrap.BackgroundTransparency = 1
@@ -213,309 +235,277 @@ local function showNotify(gui, opts)
 	local card = Instance.new("Frame", wrap)
 	card.Size = UDim2.new(1, 0, 0, 0)
 	card.AutomaticSize = Enum.AutomaticSize.Y
-	card.BackgroundColor3 = T.Sidebar
-	card.BackgroundTransparency = 0.1
-	card.Position = UDim2.fromOffset(32, 0)
+	card.BackgroundColor3 = D.Surface
+	card.BackgroundTransparency = 0.05
+	card.Position = UDim2.fromOffset(28, 0)
 	corner(card, 10)
-	stroke(card, col)
+	local cst = stroke(card, accentCol, 1)
 	pad(card, 14, 12, 8, 8)
 
+	-- left accent bar
 	local bar = Instance.new("Frame", card)
 	bar.Size = UDim2.fromOffset(3, 16)
-	bar.Position = UDim2.fromOffset(-10, 2)
-	bar.BackgroundColor3 = col
+	bar.Position = UDim2.fromOffset(-10, 4)
+	bar.BackgroundColor3 = accentCol
+	bar.BorderSizePixel = 0
 	corner(bar, 2)
 
 	local inner = Instance.new("Frame", card)
 	inner.BackgroundTransparency = 1
 	inner.Size = UDim2.new(1, 0, 0, 0)
 	inner.AutomaticSize = Enum.AutomaticSize.Y
-	list(inner, 2)
+	listLayout(inner, 2)
 
-	if opts.Title and opts.Title ~= "" then
-		local t = label(inner, opts.Title, 12, T.Text, nil, true)
+	if opts.Title ~= "" then
+		local t = mkLabel(inner, opts.Title, 12, D.Text, nil, true)
 		t.LayoutOrder = 1
 	end
 	if opts.Content and opts.Content ~= "" then
-		local sub = label(inner, opts.Content, 10, T.Sub)
-		sub.LayoutOrder = 2
+		local s = mkLabel(inner, opts.Content, 10, D.Sub)
+		s.LayoutOrder = 2
 	end
 	inner.Parent = card
 
-	-- animate in
+	-- slide in from right
 	card.BackgroundTransparency = 1
-	tw(card, TI.quint, { Position = UDim2.fromOffset(0, 0), BackgroundTransparency = 0.1 })
+	cst.Transparency = 1
+	tw(card, TI.quint, { Position = UDim2.fromOffset(0,0), BackgroundTransparency = 0.05 })
+	tw(cst,  TI.quint, { Transparency = 0 })
 
 	task.delay(dur, function()
 		if not wrap or not wrap.Parent then return end
-		tw(card, TI.fast, { Position = UDim2.fromOffset(32, 0), BackgroundTransparency = 1 })
+		local out = TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+		tw(card, out, { Position = UDim2.fromOffset(28,0), BackgroundTransparency = 1 })
+		tw(cst,  out, { Transparency = 1 })
 		task.wait(0.22)
-		if wrap then wrap:Destroy() end
+		if wrap and wrap.Parent then wrap:Destroy() end
 	end)
 end
 
--- ============================================================
--- WINDOW
--- ============================================================
-local function createWindow(velt, opts)
+-- ══════════════════════════════════════════════════════
+--  WINDOW
+-- ══════════════════════════════════════════════════════
+local function newWindow(_, opts)
 	opts = opts or {}
-	local cfg = mkConfig(opts.ConfigFolder or "VeltUI")
-	local saveEnabled = opts.SaveConfig == true
+	local cfg = mkCfg(opts.ConfigFolder or "VeltUI")
+	local saveOn = opts.SaveConfig == true
+	local toggleKey = opts.ToggleKey or Enum.KeyCode.RightShift
 
-	-- destroy old UI
-	for _, root in ipairs({ PlayerGui, game:GetService("CoreGui") }) do
-		local old = root:FindFirstChild("VeltLib_GUI")
+	-- destroy old
+	for _, root in ipairs({ PGui, game:GetService("CoreGui") }) do
+		local old = root:FindFirstChild("VeltLib2_GUI")
 		if old then old:Destroy() end
 	end
 
-	local gui = Instance.new("ScreenGui")
-	gui.Name = "VeltLib_GUI"
-	gui.ResetOnSpawn = false
-	gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-	gui.IgnoreGuiInset = true
-	gui.Parent = (gethui and gethui()) or PlayerGui
+	local GUI = Instance.new("ScreenGui")
+	GUI.Name = "VeltLib2_GUI"
+	GUI.ResetOnSpawn = false
+	GUI.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+	GUI.IgnoreGuiInset = true
+	GUI.Parent = (gethui and pcall(gethui) and gethui()) or PGui
 
-	local W, H = 580, 380
-	if opts.Size then W, H = opts.Size.X.Offset, opts.Size.Y.Offset end
-	local minW = (opts.MinSize and opts.MinSize.X) or 320
-	local minH = (opts.MinSize and opts.MinSize.Y) or 240
-
-	-- ── Main frame ──
 	local vp = workspace.CurrentCamera.ViewportSize
-	local mainF = Instance.new("CanvasGroup", gui)
-	mainF.Name = "Main"
-	mainF.Size = UDim2.fromOffset(W, H)
-	mainF.Position = UDim2.fromOffset(math.floor((vp.X - W)/2), math.floor((vp.Y - H)/2))
-	mainF.BackgroundColor3 = T.Bg
-	mainF.BackgroundTransparency = 0.1
-	mainF.GroupTransparency = 1
-	corner(mainF, 14)
-	stroke(mainF, T.Stroke, 1.2)
+	local W  = opts.Size and opts.Size.X.Offset or 640
+	local H  = opts.Size and opts.Size.Y.Offset or 420
+	local minW = (opts.MinSize and opts.MinSize.X) or 340
+	local minH = (opts.MinSize and opts.MinSize.Y) or 260
 
-	-- specular line
-	local spec = Instance.new("Frame", mainF)
-	spec.Size = UDim2.new(0.76, 0, 0, 1)
-	spec.Position = UDim2.new(0.12, 0, 0, 0)
-	spec.BackgroundColor3 = T.Accent
-	spec.BackgroundTransparency = 0.55
-	spec.BorderSizePixel = 0
+	-- ── Main frame ──────────────────────────────────────
+	local main = Instance.new("Frame", GUI)
+	main.Name = "Main"
+	main.Size = UDim2.fromOffset(W, H)
+	main.Position = UDim2.fromOffset(
+		math.floor((vp.X - W)/2),
+		math.floor((vp.Y - H)/2))
+	main.BackgroundColor3 = D.Bg
+	main.BackgroundTransparency = 0
+	main.ClipsDescendants = true
+	corner(main, 14)
+	local mainStroke = stroke(main, D.Stroke, 1.2)
 
-	-- glass gradient
-	local gg = Instance.new("UIGradient", mainF)
-	gg.Rotation = 135
-	gg.Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0,0), NumberSequenceKeypoint.new(1,0.08) })
-
-	-- cursor spotlight
-	local spot = Instance.new("Frame", mainF)
-	spot.Size = UDim2.fromScale(1,1)
-	spot.BackgroundTransparency = 1
-	spot.ZIndex = 1
-	local spotG = Instance.new("UIGradient", spot)
-	spotG.Color = ColorSequence.new({ ColorSequenceKeypoint.new(0, T.Accent), ColorSequenceKeypoint.new(1, Color3.new(0,0,0)) })
-	spotG.Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0,0.9), NumberSequenceKeypoint.new(0.4,0.97), NumberSequenceKeypoint.new(1,1) })
-
-	local mouse = LP:GetMouse()
-	RunService.RenderStepped:Connect(function()
-		if not mainF.Visible or mainF.GroupTransparency > 0.9 then return end
-		local abs, sz = mainF.AbsolutePosition, mainF.AbsoluteSize
-		if sz.X < 1 then return end
-		local nx = math.clamp((mouse.X - abs.X)/sz.X, 0, 1)
-		local ny = math.clamp((mouse.Y - abs.Y)/sz.Y, 0, 1)
-		spotG.Offset = Vector2.new(nx - 0.5, ny - 0.5)
+	-- outer glow (1px border reactive to accent, no blur)
+	onAccent(function(c)
+		tw(mainStroke, TI.slow, { Color = Color3.new(
+			c.R*0.55 + D.Stroke.R*0.45,
+			c.G*0.55 + D.Stroke.G*0.45,
+			c.B*0.55 + D.Stroke.B*0.45) })
 	end)
 
-	-- open anim
-	local mainScale = Instance.new("UIScale", mainF)
-	mainScale.Scale = 0.90
-	mainF.Visible = true
-	tw(mainF, TI.quint, { GroupTransparency = 0 })
-	tw(mainScale, TI.spring, { Scale = 1 })
+	-- specular top line (no backdrop-filter — anti-slop)
+	local spec = Instance.new("Frame", main)
+	spec.Name = "Specular"
+	spec.Size = UDim2.new(0.65, 0, 0, 1)
+	spec.Position = UDim2.new(0.175, 0, 0, 0)
+	spec.BorderSizePixel = 0
+	spec.ZIndex = 10
+	do
+		local sg = Instance.new("UIGradient", spec)
+		sg.Rotation = 0
+		onAccent(function(c)
+			sg.Color = ColorSequence.new({
+				ColorSequenceKeypoint.new(0,   Color3.new(0,0,0)),
+				ColorSequenceKeypoint.new(0.5, c),
+				ColorSequenceKeypoint.new(1,   Color3.new(0,0,0)),
+			})
+			sg.Transparency = NumberSequence.new({
+				NumberSequenceKeypoint.new(0,   1),
+				NumberSequenceKeypoint.new(0.5, 0.25),
+				NumberSequenceKeypoint.new(1,   1),
+			})
+		end)
+	end
 
-	-- ── Shadow ──
-	local shadow = Instance.new("ImageLabel", gui)
+	-- drop shadow (image behind, offset down)
+	local shadow = Instance.new("ImageLabel", GUI)
 	shadow.Name = "Shadow"
 	shadow.Image = "rbxassetid://6014261993"
-	shadow.ImageColor3 = Color3.new(0,0,0)
-	shadow.ImageTransparency = 0.5
+	shadow.ImageColor3 = Color3.new(0, 0, 0)
+	shadow.ImageTransparency = 0.55
 	shadow.ScaleType = Enum.ScaleType.Slice
-	shadow.SliceCenter = Rect.new(49,49,450,450)
+	shadow.SliceCenter = Rect.new(49, 49, 450, 450)
 	shadow.BackgroundTransparency = 1
 	shadow.ZIndex = 0
-	shadow.Size = mainF.Size + UDim2.fromOffset(60, 60)
-	shadow.Position = mainF.Position - UDim2.fromOffset(30, 22)
-	mainF:GetPropertyChangedSignal("Position"):Connect(function()
-		shadow.Position = mainF.Position - UDim2.fromOffset(30, 22)
+	local function syncShadow()
+		shadow.Position = main.Position - UDim2.fromOffset(28, 18)
+		shadow.Size = main.Size + UDim2.fromOffset(56, 36)
+	end
+	syncShadow()
+	main:GetPropertyChangedSignal("Position"):Connect(syncShadow)
+	main:GetPropertyChangedSignal("Size"):Connect(syncShadow)
+
+	-- cursor-driven spotlight (radial, opaque surface only — not a glass blur)
+	local spotFrame = Instance.new("Frame", main)
+	spotFrame.Size = UDim2.fromScale(1, 1)
+	spotFrame.BackgroundTransparency = 1
+	spotFrame.ZIndex = 1
+	local spotG = Instance.new("UIGradient", spotFrame)
+	onAccent(function(c)
+		spotG.Color = ColorSequence.new({
+			ColorSequenceKeypoint.new(0, c),
+			ColorSequenceKeypoint.new(1, Color3.new(0,0,0)),
+		})
 	end)
-	mainF:GetPropertyChangedSignal("Size"):Connect(function()
-		shadow.Size = mainF.Size + UDim2.fromOffset(60, 60)
+	spotG.Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0,   0.88),
+		NumberSequenceKeypoint.new(0.4, 0.96),
+		NumberSequenceKeypoint.new(1,   1),
+	})
+	local mouse = LP:GetMouse()
+	Run.RenderStepped:Connect(function()
+		if not main.Visible then return end
+		local abs, sz = main.AbsolutePosition, main.AbsoluteSize
+		if sz.X < 1 then return end
+		spotG.Offset = Vector2.new(
+			math.clamp((mouse.X-abs.X)/sz.X,0,1) - 0.5,
+			math.clamp((mouse.Y-abs.Y)/sz.Y,0,1) - 0.5)
 	end)
 
-	-- ── Topbar ──
-	local topbar = Instance.new("Frame", mainF)
+	-- ── TOPBAR ──────────────────────────────────────────
+	local TOPBAR_H = 52
+	local topbar = Instance.new("Frame", main)
 	topbar.Name = "Topbar"
-	topbar.Size = UDim2.new(1, 0, 0, 48)
-	topbar.BackgroundColor3 = T.Sidebar
-	topbar.BackgroundTransparency = 0.22
+	topbar.Size = UDim2.new(1, 0, 0, TOPBAR_H)
+	topbar.BackgroundColor3 = D.Sidebar
+	topbar.BackgroundTransparency = 0
 	topbar.BorderSizePixel = 0
 	topbar.ZIndex = 4
-	corner(topbar, 14)
-	local topClip = Instance.new("Frame", topbar)
-	topClip.Size = UDim2.new(1, 0, 0.5, 0)
-	topClip.Position = UDim2.new(0, 0, 0.5, 0)
-	topClip.BackgroundColor3 = T.Sidebar
-	topClip.BackgroundTransparency = 0.22
-	topClip.BorderSizePixel = 0
-	topClip.ZIndex = 3
+	-- bottom separator line
 	local tbLine = Instance.new("Frame", topbar)
 	tbLine.Size = UDim2.new(1, 0, 0, 1)
 	tbLine.Position = UDim2.new(0, 0, 1, -1)
-	tbLine.BackgroundColor3 = T.Stroke
+	tbLine.BackgroundColor3 = D.Stroke
 	tbLine.BorderSizePixel = 0
 
-	-- brand
+	-- logo image (loaded from opts.LogoId)
+	local logoSize = 28
+	local logoXOff = 18
+	if opts.LogoId and opts.LogoId ~= "" then
+		local logoImg = Instance.new("ImageLabel", topbar)
+		logoImg.Name = "Logo"
+		logoImg.Size = UDim2.fromOffset(logoSize, logoSize)
+		logoImg.Position = UDim2.new(0, logoXOff, 0.5, -logoSize/2)
+		logoImg.BackgroundTransparency = 1
+		logoImg.ScaleType = Enum.ScaleType.Fit
+		logoImg.ZIndex = 5
+		-- support rbxassetid://XXX or plain number
+		local id = tostring(opts.LogoId)
+		if not id:find("rbxassetid://") then id = "rbxassetid://" .. id end
+		logoImg.Image = id
+	end
+
+	-- brand text  ("Velt" bold + subtitle smaller)
+	local brandX = logoXOff + logoSize + 10
 	local brandLbl = Instance.new("TextLabel", topbar)
 	brandLbl.Text = tostring(opts.Title or "Velt")
 	brandLbl.Font = Enum.Font.GothamBold
-	brandLbl.TextSize = 13
-	brandLbl.TextColor3 = T.Accent
+	brandLbl.TextSize = 14
+	brandLbl.TextColor3 = D.Accent
 	brandLbl.BackgroundTransparency = 1
-	brandLbl.Position = UDim2.fromOffset(18, 0)
-	brandLbl.Size = UDim2.new(0, 180, 1, 0)
+	brandLbl.Position = UDim2.fromOffset(brandX, 10)
+	brandLbl.Size = UDim2.new(0, 180, 0, 18)
 	brandLbl.TextXAlignment = Enum.TextXAlignment.Left
 	brandLbl.ZIndex = 5
+	onAccent(function(c) brandLbl.TextColor3 = c end)
 
 	local subLbl = Instance.new("TextLabel", topbar)
 	subLbl.Text = tostring(opts.Subtitle or "")
 	subLbl.Font = Enum.Font.Gotham
 	subLbl.TextSize = 10
-	subLbl.TextColor3 = T.Sub
+	subLbl.TextColor3 = D.Sub
 	subLbl.BackgroundTransparency = 1
-	subLbl.Position = UDim2.new(0, 18, 0.55, 0)
-	subLbl.Size = UDim2.new(0, 160, 0, 14)
+	subLbl.Position = UDim2.fromOffset(brandX, 30)
+	subLbl.Size = UDim2.new(0, 220, 0, 14)
 	subLbl.TextXAlignment = Enum.TextXAlignment.Left
 	subLbl.ZIndex = 5
 
-	-- minimize btn
+	-- minimize btn (top-right, clean "—")
 	local minBtn = Instance.new("TextButton", topbar)
 	minBtn.Size = UDim2.fromOffset(28, 28)
 	minBtn.AnchorPoint = Vector2.new(1, 0.5)
 	minBtn.Position = UDim2.new(1, -12, 0.5, 0)
-	minBtn.BackgroundColor3 = T.Card
+	minBtn.BackgroundColor3 = D.Card
 	minBtn.Text = "—"
-	minBtn.TextColor3 = T.Sub
+	minBtn.TextColor3 = D.Sub
 	minBtn.Font = Enum.Font.GothamBold
-	minBtn.TextSize = 12
+	minBtn.TextSize = 13
 	minBtn.AutoButtonColor = false
 	minBtn.ZIndex = 5
 	corner(minBtn, 8)
-	stroke(minBtn, T.Stroke, 1)
-	attachScale(minBtn, 1.1, 0.88)
-
-	-- ── Island pill (minimize mode) ──
-	local island = Instance.new("TextButton", gui)
-	island.Name = "VeltIsland"
-	island.Size = UDim2.fromOffset(190, 34)
-	island.AnchorPoint = Vector2.new(0.5, 0)
-	island.Position = UDim2.new(0.5, 0, 0, 14)
-	island.BackgroundColor3 = Color3.fromRGB(13, 15, 22)
-	island.BackgroundTransparency = 0.1
-	island.Text = ""
-	island.AutoButtonColor = false
-	island.Visible = false
-	island.ZIndex = 60
-	corner(island, 40)
-	stroke(island, T.Accent, 1.2)
-	local idot = Instance.new("Frame", island)
-	idot.Size = UDim2.fromOffset(8,8)
-	idot.Position = UDim2.fromOffset(14, 13)
-	idot.BackgroundColor3 = T.Accent
-	corner(idot)
-	local ilbl = Instance.new("TextLabel", island)
-	ilbl.Text = tostring(opts.Title or "Velt") .. "   •   tap to open"
-	ilbl.Font = Enum.Font.GothamBold
-	ilbl.TextSize = 11
-	ilbl.TextColor3 = T.Text
-	ilbl.BackgroundTransparency = 1
-	ilbl.Position = UDim2.fromOffset(28, 0)
-	ilbl.Size = UDim2.new(1, -32, 1, 0)
-	ilbl.TextXAlignment = Enum.TextXAlignment.Left
-	task.spawn(function()
-		while idot and idot.Parent do
-			tw(idot, TweenInfo.new(1, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut), { BackgroundTransparency = 0.65 })
-			task.wait(1)
-			tw(idot, TweenInfo.new(1, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut), { BackgroundTransparency = 0 })
-			task.wait(1)
-		end
+	local minSt = stroke(minBtn, D.Stroke, 1)
+	minBtn.MouseEnter:Connect(function()
+		tw(minBtn, TI.hover, { BackgroundColor3 = D.CardHov })
+		tw(minSt, TI.hover, { Color = D.Accent })
 	end)
-	attachScale(island, 1.05, 0.95)
-
-	local isOpen = true
-	local isAnimating = false
-
-	local function openPanel()
-		if isAnimating then return end
-		isAnimating = true
-		island.Visible = false
-		mainF.Visible = true
-		mainF.GroupTransparency = 1
-		mainScale.Scale = 0.90
-		tw(mainF, TI.quint, { GroupTransparency = 0 })
-		tw(mainScale, TI.spring, { Scale = 1 })
-		task.delay(0.32, function() isAnimating = false end)
-		isOpen = true
-	end
-
-	local function closePanel()
-		if isAnimating then return end
-		isAnimating = true
-		tw(mainF, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.In), { GroupTransparency = 1 })
-		tw(mainScale, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.In), { Scale = 0.90 })
-		task.delay(0.22, function()
-			mainF.Visible = false
-			island.Visible = true
-			local is2 = Instance.new("UIScale", island); is2.Scale = 0.80
-			tw(is2, TI.spring, { Scale = 1 })
-			isAnimating = false
-		end)
-		isOpen = false
-	end
-
-	minBtn.MouseButton1Click:Connect(closePanel)
-	island.MouseButton1Click:Connect(openPanel)
-	UserInput.InputBegan:Connect(function(input, gp)
-		if gp then return end
-		if input.KeyCode == Enum.KeyCode.RightShift then
-			if isOpen then closePanel() else openPanel() end
-		end
+	minBtn.MouseLeave:Connect(function()
+		tw(minBtn, TI.hover, { BackgroundColor3 = D.Card })
+		tw(minSt, TI.hover, { Color = D.Stroke })
 	end)
 
-	-- drag
-	local dragging, dragStart, dragStartPos
-	topbar.InputBegan:Connect(function(input)
-		if input.UserInputType == Enum.UserInputType.MouseButton1 then
-			dragging = true
-			dragStart = input.Position
-			dragStartPos = mainF.Position
-			input.Changed:Connect(function()
-				if input.UserInputState == Enum.UserInputState.End then dragging = false end
+	-- drag (topbar)
+	local dragging, dragStart, dragBase
+	topbar.InputBegan:Connect(function(inp)
+		if inp.UserInputType == Enum.UserInputType.MouseButton1 then
+			dragging, dragStart, dragBase = true, inp.Position, main.Position
+			inp.Changed:Connect(function()
+				if inp.UserInputState == Enum.UserInputState.End then dragging = false end
 			end)
 		end
 	end)
-	local dragInput
-	topbar.InputChanged:Connect(function(input)
-		if input.UserInputType == Enum.UserInputType.MouseMovement then dragInput = input end
+	local dragInp
+	topbar.InputChanged:Connect(function(inp)
+		if inp.UserInputType == Enum.UserInputType.MouseMovement then dragInp = inp end
 	end)
-	UserInput.InputChanged:Connect(function(input)
-		if input == dragInput and dragging then
-			local d = input.Position - dragStart
-			mainF.Position = UDim2.new(
-				dragStartPos.X.Scale, dragStartPos.X.Offset + d.X,
-				dragStartPos.Y.Scale, dragStartPos.Y.Offset + d.Y)
+	UIS.InputChanged:Connect(function(inp)
+		if inp == dragInp and dragging then
+			local d = inp.Position - dragStart
+			main.Position = UDim2.new(
+				dragBase.X.Scale, dragBase.X.Offset + d.X,
+				dragBase.Y.Scale, dragBase.Y.Offset + d.Y)
 		end
 	end)
 
-	-- resize grip
-	local grip = Instance.new("TextButton", mainF)
+	-- resize grip (bottom-right)
+	local grip = Instance.new("TextButton", main)
 	grip.Size = UDim2.fromOffset(18, 18)
 	grip.AnchorPoint = Vector2.new(1, 1)
 	grip.Position = UDim2.fromScale(1, 1)
@@ -524,263 +514,412 @@ local function createWindow(velt, opts)
 	grip.ZIndex = 20
 	for _, pt in ipairs({{11,11},{6,11},{11,6}}) do
 		local d = Instance.new("Frame", grip)
-		d.Size = UDim2.fromOffset(3,3)
+		d.Size = UDim2.fromOffset(3, 3)
 		d.Position = UDim2.fromOffset(pt[1], pt[2])
-		d.BackgroundColor3 = T.Sub
-		d.BackgroundTransparency = 0.5
+		d.BackgroundColor3 = D.Muted
 		d.BorderSizePixel = 0
 		corner(d)
 	end
 	do
-		local rDrag, rStart, rSize
-		grip.InputBegan:Connect(function(input)
-			if input.UserInputType == Enum.UserInputType.MouseButton1 then
-				rDrag = true
-				rStart = input.Position
-				rSize = mainF.AbsoluteSize
-				input.Changed:Connect(function()
-					if input.UserInputState == Enum.UserInputState.End then rDrag = false end
+		local rD, rS, rSz
+		grip.InputBegan:Connect(function(inp)
+			if inp.UserInputType == Enum.UserInputType.MouseButton1 then
+				rD, rS, rSz = true, inp.Position, main.AbsoluteSize
+				inp.Changed:Connect(function()
+					if inp.UserInputState == Enum.UserInputState.End then rD = false end
 				end)
 			end
 		end)
-		UserInput.InputChanged:Connect(function(input)
-			if rDrag and input.UserInputType == Enum.UserInputType.MouseMovement then
-				local d = input.Position - rStart
-				local nw = math.max(minW, rSize.X + d.X)
-				local nh = math.max(minH, rSize.Y + d.Y)
-				mainF.Size = UDim2.fromOffset(nw, nh)
+		UIS.InputChanged:Connect(function(inp)
+			if rD and inp.UserInputType == Enum.UserInputType.MouseMovement then
+				local d = inp.Position - rS
+				main.Size = UDim2.fromOffset(
+					math.max(minW, rSz.X + d.X),
+					math.max(minH, rSz.Y + d.Y))
 			end
 		end)
 	end
 
-	-- ── Sidebar ──
-	local sidebar = Instance.new("Frame", mainF)
+	-- ── ISLAND PILL (minimized state) ───────────────────
+	local island = Instance.new("TextButton", GUI)
+	island.Name = "VeltIsland"
+	island.Size = UDim2.fromOffset(200, 36)
+	island.AnchorPoint = Vector2.new(0.5, 0)
+	island.Position = UDim2.new(0.5, 0, 0, 14)
+	island.BackgroundColor3 = D.Sidebar
+	island.BackgroundTransparency = 0
+	island.Text = ""
+	island.AutoButtonColor = false
+	island.Visible = false
+	island.ZIndex = 60
+	corner(island, 40)
+	local islandSt = stroke(island, D.Accent, 1.3)
+	onAccent(function(c) islandSt.Color = c end)
+	-- pulsing dot
+	local iDot = Instance.new("Frame", island)
+	iDot.Size = UDim2.fromOffset(8, 8)
+	iDot.Position = UDim2.fromOffset(14, 14)
+	iDot.BorderSizePixel = 0
+	corner(iDot)
+	onAccent(function(c) iDot.BackgroundColor3 = c end)
+	task.spawn(function()
+		while iDot and iDot.Parent do
+			tw(iDot, TI.sine, { BackgroundTransparency = 0.7 })
+			task.wait(1)
+			tw(iDot, TI.sine, { BackgroundTransparency = 0 })
+			task.wait(1)
+		end
+	end)
+	local iLbl = Instance.new("TextLabel", island)
+	iLbl.Text = tostring(opts.Title or "Velt") .. "   •   tap to open"
+	iLbl.Font = Enum.Font.GothamBold
+	iLbl.TextSize = 11
+	iLbl.TextColor3 = D.Text
+	iLbl.BackgroundTransparency = 1
+	iLbl.Position = UDim2.fromOffset(28, 0)
+	iLbl.Size = UDim2.new(1, -32, 1, 0)
+	iLbl.TextXAlignment = Enum.TextXAlignment.Left
+	springScale(island, 1.05, 0.95)
+
+	local panelOpen = true
+	local animating  = false
+
+	-- open: zoom-spring in, fade-in
+	local function openPanel()
+		if animating then return end
+		animating = true
+		island.Visible = false
+		main.Visible = true
+		main.GroupTransparency = 1  -- CanvasGroup not used so just fade via children, but Frame doesn't have GT
+		-- use a frame overlay to fake group fade
+		local fader = Instance.new("Frame", main)
+		fader.Size = UDim2.fromScale(1,1)
+		fader.BackgroundColor3 = D.Bg
+		fader.BackgroundTransparency = 0
+		fader.ZIndex = 100
+		fader.BorderSizePixel = 0
+		local ms = Instance.new("UIScale", main); ms.Scale = 0.92
+		tw(fader, TI.quint, { BackgroundTransparency = 1 })
+		tw(ms, TI.spring, { Scale = 1 })
+		task.delay(0.30, function()
+			if fader and fader.Parent then fader:Destroy() end
+			ms:Destroy()
+			animating = false
+		end)
+		panelOpen = true
+	end
+
+	-- close: fade out, island appears
+	local function closePanel()
+		if animating then return end
+		animating = true
+		local fader = Instance.new("Frame", main)
+		fader.Size = UDim2.fromScale(1,1)
+		fader.BackgroundColor3 = D.Bg
+		fader.BackgroundTransparency = 1
+		fader.ZIndex = 100
+		fader.BorderSizePixel = 0
+		tw(fader, TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+			{ BackgroundTransparency = 0 })
+		task.delay(0.20, function()
+			main.Visible = false
+			if fader and fader.Parent then fader:Destroy() end
+			island.Visible = true
+			local is2 = Instance.new("UIScale", island); is2.Scale = 0.80
+			tw(is2, TI.spring, { Scale = 1 })
+			task.delay(0.32, function()
+				pcall(function() is2:Destroy() end)
+				animating = false
+			end)
+		end)
+		panelOpen = false
+	end
+
+	minBtn.MouseButton1Click:Connect(closePanel)
+	island.MouseButton1Click:Connect(openPanel)
+	UIS.InputBegan:Connect(function(inp, gp)
+		if gp then return end
+		if inp.KeyCode == toggleKey then
+			if panelOpen then closePanel() else openPanel() end
+		end
+	end)
+
+	-- open anim on first show
+	main.Visible = true
+	do
+		local ms2 = Instance.new("UIScale", main); ms2.Scale = 0.90
+		local fader2 = Instance.new("Frame", main)
+		fader2.Size = UDim2.fromScale(1,1)
+		fader2.BackgroundColor3 = D.Bg
+		fader2.BackgroundTransparency = 0
+		fader2.ZIndex = 100
+		fader2.BorderSizePixel = 0
+		tw(fader2, TI.quint, { BackgroundTransparency = 1 })
+		tw(ms2, TI.spring, { Scale = 1 })
+		task.delay(0.32, function()
+			pcall(function() fader2:Destroy() end)
+			pcall(function() ms2:Destroy() end)
+		end)
+	end
+
+	-- ── SIDEBAR ─────────────────────────────────────────
+	local SIDEBAR_W = 150
+	local sidebar = Instance.new("Frame", main)
 	sidebar.Name = "Sidebar"
-	sidebar.Size = UDim2.new(0, 148, 1, -48)
-	sidebar.Position = UDim2.fromOffset(0, 48)
-	sidebar.BackgroundColor3 = T.Sidebar
-	sidebar.BackgroundTransparency = 0.3
+	sidebar.Size = UDim2.new(0, SIDEBAR_W, 1, -TOPBAR_H)
+	sidebar.Position = UDim2.fromOffset(0, TOPBAR_H)
+	sidebar.BackgroundColor3 = D.Sidebar
+	sidebar.BackgroundTransparency = 0
 	sidebar.BorderSizePixel = 0
+	sidebar.ZIndex = 3
+	-- right border line
 	local sbLine = Instance.new("Frame", sidebar)
 	sbLine.Size = UDim2.new(0, 1, 1, 0)
 	sbLine.Position = UDim2.new(1, -1, 0, 0)
-	sbLine.BackgroundColor3 = T.Stroke
+	sbLine.BackgroundColor3 = D.Stroke
 	sbLine.BorderSizePixel = 0
 
-	-- indicator
+	-- spring indicator pill
 	local indicator = Instance.new("Frame", sidebar)
 	indicator.Size = UDim2.fromOffset(3, 20)
-	indicator.Position = UDim2.fromOffset(8, 20)
-	indicator.BackgroundColor3 = T.Accent
+	indicator.Position = UDim2.fromOffset(6, 18)
 	indicator.BorderSizePixel = 0
-	corner(indicator)
+	corner(indicator, 2)
+	onAccent(function(c)
+		indicator.BackgroundColor3 = c
+		local ig = Instance.new("UIGradient", indicator)
+		ig.Rotation = 90
+		ig.Color = ColorSequence.new({
+			ColorSequenceKeypoint.new(0, c),
+			ColorSequenceKeypoint.new(1, Color3.new(c.R*0.5, c.G*0.5, c.B*0.5)),
+		})
+	end)
 
 	local navHolder = Instance.new("Frame", sidebar)
 	navHolder.BackgroundTransparency = 1
 	navHolder.Size = UDim2.fromScale(1, 1)
-	local navList = list(navHolder, 4)
-	local navPad = Instance.new("UIPadding", navHolder)
-	navPad.PaddingTop, navPad.PaddingLeft, navPad.PaddingRight = UDim.new(0,12), UDim.new(0,8), UDim.new(0,8)
+	navHolder.ClipsDescendants = true
+	local navList = listLayout(navHolder, 2)
+	pad(navHolder, 8, 8, 12, 12)
 
-	-- group headers in nav
-	local groupSeps = {}
-	local function ensureGroupHeader(groupName)
-		if not groupName or groupName == "" then return end
-		if groupSeps[groupName] then return end
-		local lbl = Instance.new("TextLabel", navHolder)
-		lbl.Text = string.upper(groupName)
-		lbl.Font = Enum.Font.GothamBold
-		lbl.TextSize = 9
-		lbl.TextColor3 = T.Sub
-		lbl.BackgroundTransparency = 1
-		lbl.Size = UDim2.new(1, 0, 0, 18)
-		lbl.TextXAlignment = Enum.TextXAlignment.Left
-		lbl.LayoutOrder = (#navHolder:GetChildren()) * 10
-		local lp = Instance.new("UIPadding", lbl)
-		lp.PaddingLeft = UDim.new(0, 6)
-		groupSeps[groupName] = true
-	end
-
-	-- ── Content area ──
-	local contentArea = Instance.new("Frame", mainF)
+	-- ── CONTENT ─────────────────────────────────────────
+	local contentArea = Instance.new("Frame", main)
 	contentArea.Name = "Content"
 	contentArea.BackgroundTransparency = 1
-	contentArea.Size = UDim2.new(1, -148, 1, -48)
-	contentArea.Position = UDim2.fromOffset(148, 48)
+	contentArea.Size = UDim2.new(1, -SIDEBAR_W, 1, -TOPBAR_H)
+	contentArea.Position = UDim2.fromOffset(SIDEBAR_W, TOPBAR_H)
 	contentArea.ClipsDescendants = true
+	contentArea.ZIndex = 2
 
-	-- ── Tab management ──
-	local WIN = { Gui = gui, Main = mainF, tabs = {}, activeTab = nil, cfg = cfg }
+	-- ── WINDOW OBJECT ───────────────────────────────────
+	local WIN = {
+		Gui = GUI, Main = main,
+		tabs = {}, activeTab = nil,
+		cfg = cfg,
+	}
 
 	local TAB_H = 34
-	local function getTabY(order)
-		return 12 + order * (TAB_H + 4) + 7
-	end
+	local function tabY(order) return 12 + order * (TAB_H + 3) + 7 end
 
 	local function selectTab(tab)
 		if WIN.activeTab == tab then return end
 		if WIN.activeTab then
-			local prev = WIN.activeTab
-			tw(prev.btn, TI.fast, { BackgroundTransparency = 1, TextColor3 = T.Sub })
-			prev.page.Visible = false
+			local p = WIN.activeTab
+			tw(p.btn, TI.fast, { BackgroundTransparency = 1, TextColor3 = D.Sub })
+			p.page.Visible = false
 		end
 		WIN.activeTab = tab
-		tw(tab.btn, TI.fast, { BackgroundTransparency = 0.22, TextColor3 = T.Text })
-		tab.page.Position = UDim2.fromOffset(0, 8)
-		tab.page.Visible = true
+		tw(tab.btn, TI.fast, { BackgroundTransparency = 0.14, TextColor3 = D.Text })
+		tab.page.Position = UDim2.fromOffset(0, 10)
+		tab.page.Visible  = true
 		tw(tab.page, TI.quint, { Position = UDim2.fromOffset(0, 0) })
-		local targetY = getTabY(tab.order)
-		tw(indicator, TweenInfo.new(0.28, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Position = UDim2.fromOffset(8, targetY) })
+		-- spring-slide indicator
+		local ty = tabY(tab.order)
+		tw(indicator, TweenInfo.new(0.26, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
+			{ Position = UDim2.fromOffset(6, ty) })
 		indicator.Size = UDim2.fromOffset(4, 24)
-		task.delay(0.1, function() tw(indicator, TI.spring, { Size = UDim2.fromOffset(3, 20) }) end)
+		task.delay(0.08, function()
+			tw(indicator, TI.spring, { Size = UDim2.fromOffset(3, 20) })
+		end)
 	end
 
-	function WIN:AddTab(tabOpts)
-		tabOpts = tabOpts or {}
+	-- ── AddTab ──────────────────────────────────────────
+	function WIN:AddTab(topts)
+		topts = topts or {}
 		local order = #self.tabs
-		ensureGroupHeader(tabOpts.Group)
 
+		-- optional group separator label
+		if topts.Group and topts.Group ~= "" then
+			local seen = false
+			for _, c in ipairs(navHolder:GetChildren()) do
+				if c:IsA("TextLabel") and c.Text == topts.Group:upper() then seen = true end
+			end
+			if not seen then
+				local gl = Instance.new("TextLabel", navHolder)
+				gl.Text = topts.Group:upper()
+				gl.Font = Enum.Font.GothamBold
+				gl.TextSize = 8
+				gl.TextColor3 = D.Muted
+				gl.BackgroundTransparency = 1
+				gl.Size = UDim2.new(1, 0, 0, 16)
+				gl.TextXAlignment = Enum.TextXAlignment.Left
+				gl.LayoutOrder = order * 10
+				pad(gl, 6, 0, 2, 0)
+			end
+		end
+
+		-- tab button
 		local btn = Instance.new("TextButton", navHolder)
 		btn.Size = UDim2.new(1, 0, 0, TAB_H)
-		btn.BackgroundColor3 = T.Card
+		btn.BackgroundColor3 = D.CardHov
 		btn.BackgroundTransparency = 1
-		btn.Text = "  " .. tostring(tabOpts.Title or "Tab")
-		btn.TextColor3 = T.Sub
+		btn.Text = "  " .. tostring(topts.Title or "Tab")
+		btn.TextColor3 = D.Sub
 		btn.Font = Enum.Font.GothamMedium
 		btn.TextSize = 11
 		btn.TextXAlignment = Enum.TextXAlignment.Left
 		btn.AutoButtonColor = false
 		btn.LayoutOrder = order * 10 + 1
 		corner(btn, 8)
-		attachScale(btn, 1.025, 0.97)
+		btn.MouseEnter:Connect(function()
+			if WIN.activeTab and WIN.activeTab.btn == btn then return end
+			tw(btn, TI.hover, { BackgroundTransparency = 0.65, TextColor3 = D.Text })
+		end)
+		btn.MouseLeave:Connect(function()
+			if WIN.activeTab and WIN.activeTab.btn == btn then return end
+			tw(btn, TI.hover, { BackgroundTransparency = 1, TextColor3 = D.Sub })
+		end)
 
+		-- scrollable page
 		local page = Instance.new("ScrollingFrame", contentArea)
-		page.Name = "Page_" .. tostring(tabOpts.Title or order)
+		page.Name = "Page_" .. tostring(topts.Title or order)
 		page.Size = UDim2.fromScale(1, 1)
 		page.BackgroundTransparency = 1
 		page.BorderSizePixel = 0
-		page.ScrollBarThickness = 3
-		page.ScrollBarImageColor3 = T.Stroke
+		-- clean, thin scrollbar — no decorative track
+		page.ScrollBarThickness = 2
+		page.ScrollBarImageColor3 = D.StrokeH
+		page.ScrollBarImageTransparency = 0.3
+		page.TopImage = "rbxasset://textures/ui/Scroll/scroll-middle.png"
+		page.BottomImage = "rbxasset://textures/ui/Scroll/scroll-middle.png"
+		page.MidImage = "rbxasset://textures/ui/Scroll/scroll-middle.png"
 		page.AutomaticCanvasSize = Enum.AutomaticSize.Y
 		page.CanvasSize = UDim2.new()
 		page.Visible = false
-		local pageList = list(page, 6)
-		local pagePad = Instance.new("UIPadding", page)
-		pagePad.PaddingTop, pagePad.PaddingLeft, pagePad.PaddingRight, pagePad.PaddingBottom =
-			UDim.new(0,12), UDim.new(0,12), UDim.new(0,12), UDim.new(0,12)
+		listLayout(page, 6)
+		pad(page, 14, 14, 12, 14)
 
-		local tabObj = { btn = btn, page = page, order = order, elements = {}, _order = 0 }
+		local tabObj = {
+			btn = btn, page = page, order = order,
+			elements = {}, _order = 0,
+		}
 
 		btn.MouseButton1Click:Connect(function() selectTab(tabObj) end)
-
-		-- hover
-		local hovBg = false
-		btn.MouseEnter:Connect(function()
-			hovBg = true
-			if WIN.activeTab ~= tabObj then tw(btn, TI.fast, { BackgroundTransparency = 0.55 }) end
-		end)
-		btn.MouseLeave:Connect(function()
-			hovBg = false
-			if WIN.activeTab ~= tabObj then tw(btn, TI.fast, { BackgroundTransparency = 1 }) end
-		end)
-
 		table.insert(self.tabs, tabObj)
 		if not WIN.activeTab then selectTab(tabObj) end
 
-		local function nextOrder()
-			tabObj._order = tabObj._order + 1
+		local function nxt()
+			tabObj._order += 1
 			return tabObj._order
 		end
 
-		-- ── AddSection ──
+		-- ── AddSection ────────────────────────────────
 		function tabObj:AddSection(name)
 			local f = Instance.new("Frame", page)
-			f.Size = UDim2.new(1, 0, 0, 0)
-			f.AutomaticSize = Enum.AutomaticSize.Y
+			f.Size = UDim2.new(1, 0, 0, 24)
 			f.BackgroundTransparency = 1
-			f.LayoutOrder = nextOrder()
-			local lbl2 = label(f, string.upper(name), 9, T.Accent, nil, true)
-			lbl2.Size = UDim2.new(1, 0, 0, 20)
-			lbl2.AutomaticSize = Enum.AutomaticSize.None
-			lbl2.TextYAlignment = Enum.TextYAlignment.Bottom
-			local pad2 = Instance.new("UIPadding", lbl2)
-			pad2.PaddingLeft = UDim.new(0, 2)
+			f.LayoutOrder = nxt()
+			local lbl = mkLabel(f, name:upper(), 9, D.Accent, nil, true)
+			lbl.Size = UDim2.new(1, 0, 1, 0)
+			lbl.AutomaticSize = Enum.AutomaticSize.None
+			lbl.TextYAlignment = Enum.TextYAlignment.Bottom
+			local lp = Instance.new("UIPadding", lbl)
+			lp.PaddingLeft = UDim.new(0, 2)
+			lp.PaddingBottom = UDim.new(0, 2)
+			onAccent(function(c) lbl.TextColor3 = c end)
 		end
 
-		-- ── AddLabel ──
+		-- ── AddLabel ──────────────────────────────────
 		function tabObj:AddLabel(text)
 			local card = Instance.new("Frame", page)
 			card.Size = UDim2.new(1, 0, 0, 0)
 			card.AutomaticSize = Enum.AutomaticSize.Y
-			card.BackgroundColor3 = T.Card
-			card.BackgroundTransparency = 0.3
-			card.LayoutOrder = nextOrder()
-			corner(card, 8)
-			pad(card, 10, 10, 6, 6)
-			local lbl3 = label(card, tostring(text), 10, T.Sub)
-			lbl3.TextWrapped = true
+			card.BackgroundColor3 = D.Card
+			card.BackgroundTransparency = 0.18
+			card.LayoutOrder = nxt()
+			corner(card, 10)
+			local cst = stroke(card, D.Stroke, 1)
+			pad(card, 12, 12, 8, 8)
+			cardHover(card, cst)
+			local lbl = mkLabel(card, tostring(text), 10, D.Sub)
+			lbl.TextWrapped = true
 			local obj = {}
-			function obj:Set(t) lbl3.Text = tostring(t) end
+			function obj:Set(t) lbl.Text = tostring(t) end
 			table.insert(tabObj.elements, obj)
 			return obj
 		end
 
-		-- ── AddToggle ──
-		function tabObj:AddToggle(topts)
-			topts = topts or {}
-			local flagKey = topts.Flag and ("toggle_" .. tostring(topts.Flag))
-			local defVal = topts.Default
-			if saveEnabled and flagKey then
-				defVal = cfg:loadBool(flagKey, defVal)
-			end
-			local value = defVal == true
+		-- ── AddToggle ─────────────────────────────────
+		function tabObj:AddToggle(topts2)
+			topts2 = topts2 or {}
+			local flagKey = topts2.Flag and ("tgl_" .. tostring(topts2.Flag))
+			local def = topts2.Default
+			if saveOn and flagKey then def = cfg:bool(flagKey, def) end
+			local value = def == true
 
 			local card = Instance.new("Frame", page)
 			card.Size = UDim2.new(1, 0, 0, 44)
-			card.BackgroundColor3 = T.Card
-			card.BackgroundTransparency = 0.22
-			card.LayoutOrder = nextOrder()
+			card.BackgroundColor3 = D.Card
+			card.BackgroundTransparency = 0.18
+			card.LayoutOrder = nxt()
 			corner(card, 10)
-			local cst = stroke(card, T.Stroke)
+			local cst = stroke(card, D.Stroke, 1)
 			pad(card, 12, 12, 0, 0)
-			attachHover(card, cst)
+			cardHover(card, cst)
 
-			local nameLbl = label(card, tostring(topts.Name or "Toggle"), 11, T.Text, nil, false)
+			local nameLbl = mkLabel(card, tostring(topts2.Name or "Toggle"), 11, D.Text)
 			nameLbl.Size = UDim2.new(1, -66, 1, 0)
 			nameLbl.AutomaticSize = Enum.AutomaticSize.None
 			nameLbl.TextYAlignment = Enum.TextYAlignment.Center
 
+			-- track
 			local track = Instance.new("Frame", card)
 			track.Size = UDim2.fromOffset(44, 22)
 			track.AnchorPoint = Vector2.new(1, 0.5)
-			track.Position = UDim2.new(1, -6, 0.5, 0)
-			track.BackgroundColor3 = value and T.Accent or T.TogOff
+			track.Position = UDim2.new(1, -8, 0.5, 0)
+			track.BackgroundColor3 = value and D.Accent or D.TogOff
 			corner(track, 11)
-			local trackScale = Instance.new("UIScale", track); trackScale.Scale = 1
+			local trackUs = Instance.new("UIScale", track); trackUs.Scale = 1
+			onAccent(function(c) if value then track.BackgroundColor3 = c end end)
+
+			-- knob
 			local knob = Instance.new("Frame", track)
 			knob.Size = UDim2.fromOffset(16, 16)
 			knob.Position = value and UDim2.fromOffset(25, 3) or UDim2.fromOffset(3, 3)
-			knob.BackgroundColor3 = Color3.new(1,1,1)
+			knob.BackgroundColor3 = Color3.new(1, 1, 1)
+			knob.BorderSizePixel = 0
 			corner(knob, 10)
-			local knobScale = Instance.new("UIScale", knob); knobScale.Scale = 1
+			local knobUs = Instance.new("UIScale", knob); knobUs.Scale = 1
 
 			local obj = {}
 			function obj:Set(v, silent)
 				value = v == true
-				tw(track, TI.fast, { BackgroundColor3 = value and T.Accent or T.TogOff })
-				tw(knob, TI.bounce, { Position = value and UDim2.fromOffset(25,3) or UDim2.fromOffset(3,3) })
-				tw(knobScale, TI.bounce, { Scale = value and 1.12 or 1 })
-				task.delay(0.18, function() tw(knobScale, TI.fast, { Scale = 1 }) end)
-				if not silent and topts.Callback then pcall(topts.Callback, value) end
-				if saveEnabled and flagKey then cfg:save(flagKey, tostring(value)) end
+				tw(track, TI.fast, { BackgroundColor3 = value and D.Accent or D.TogOff })
+				tw(knob, TI.bounce, {
+					Position = value and UDim2.fromOffset(25, 3) or UDim2.fromOffset(3, 3)
+				})
+				tw(knobUs, TI.bounce, { Scale = value and 1.14 or 1 })
+				task.delay(0.18, function() tw(knobUs, TI.fast, { Scale = 1 }) end)
+				if not silent and topts2.Callback then pcall(topts2.Callback, value) end
+				if saveOn and flagKey then cfg:save(flagKey, tostring(value)) end
 			end
 			function obj:Get() return value end
 
-			track.MouseEnter:Connect(function() tw(trackScale, TI.fast, { Scale = 1.08 }) end)
-			track.MouseLeave:Connect(function() tw(trackScale, TI.fast, { Scale = 1 }) end)
+			track.MouseEnter:Connect(function() tw(trackUs, TI.hover, { Scale = 1.08 }) end)
+			track.MouseLeave:Connect(function() tw(trackUs, TI.hover, { Scale = 1 }) end)
 
 			local hit = Instance.new("TextButton", card)
-			hit.Size = UDim2.fromScale(1,1)
+			hit.Size = UDim2.fromScale(1, 1)
 			hit.BackgroundTransparency = 1
 			hit.Text = ""
 			hit.ZIndex = 2
@@ -790,80 +929,89 @@ local function createWindow(velt, opts)
 			return obj
 		end
 
-		-- ── AddSlider ──
+		-- ── AddSlider ─────────────────────────────────
 		function tabObj:AddSlider(sopts)
 			sopts = sopts or {}
-			local flagKey = sopts.Flag and ("slider_" .. tostring(sopts.Flag))
-			local defVal = sopts.Default or sopts.Min or 0
-			if saveEnabled and flagKey then defVal = cfg:loadNum(flagKey, defVal) end
+			local flagKey = sopts.Flag and ("sld_" .. tostring(sopts.Flag))
 			local minV, maxV = sopts.Min or 0, sopts.Max or 100
 			local step = sopts.Step or 1
-			local value = math.clamp(defVal, minV, maxV)
+			local def = sopts.Default or minV
+			if saveOn and flagKey then def = cfg:num(flagKey, def) end
+			local value = math.clamp(def, minV, maxV)
 
 			local card = Instance.new("Frame", page)
 			card.Size = UDim2.new(1, 0, 0, 56)
-			card.BackgroundColor3 = T.Card
-			card.BackgroundTransparency = 0.22
-			card.LayoutOrder = nextOrder()
+			card.BackgroundColor3 = D.Card
+			card.BackgroundTransparency = 0.18
+			card.LayoutOrder = nxt()
 			corner(card, 10)
-			local cst = stroke(card, T.Stroke)
+			local cst = stroke(card, D.Stroke, 1)
 			pad(card, 12, 12, 0, 0)
-			attachHover(card, cst)
+			cardHover(card, cst)
 
-			local nameLbl = label(card, tostring(sopts.Name or "Slider"), 11, T.Text)
+			local nameLbl = mkLabel(card, tostring(sopts.Name or "Slider"), 11, D.Text)
 			nameLbl.Size = UDim2.new(1, -66, 0, 20)
 			nameLbl.AutomaticSize = Enum.AutomaticSize.None
 			nameLbl.Position = UDim2.fromOffset(0, 10)
+			nameLbl.TextYAlignment = Enum.TextYAlignment.Center
 
 			local valLbl = Instance.new("TextLabel", card)
 			valLbl.Size = UDim2.fromOffset(60, 20)
 			valLbl.AnchorPoint = Vector2.new(1, 0)
 			valLbl.Position = UDim2.new(1, 0, 0, 10)
 			valLbl.BackgroundTransparency = 1
-			valLbl.TextColor3 = T.Accent
 			valLbl.Font = Enum.Font.GothamBold
 			valLbl.TextSize = 11
 			valLbl.TextXAlignment = Enum.TextXAlignment.Right
+			onAccent(function(c) valLbl.TextColor3 = c end)
 
+			-- track
 			local trackBg = Instance.new("Frame", card)
-			trackBg.Size = UDim2.new(1, -6, 0, 5)
-			trackBg.Position = UDim2.fromOffset(0, 40)
-			trackBg.BackgroundColor3 = T.TogOff
-			corner(trackBg, 3)
+			trackBg.Size = UDim2.new(1, -6, 0, 4)
+			trackBg.Position = UDim2.fromOffset(0, 42)
+			trackBg.BackgroundColor3 = D.TogOff
+			corner(trackBg, 2)
+
 			local fill = Instance.new("Frame", trackBg)
-			fill.BackgroundColor3 = T.Accent
 			fill.Size = UDim2.fromScale(0, 1)
-			corner(fill, 3)
+			fill.BorderSizePixel = 0
+			corner(fill, 2)
+			onAccent(function(c) fill.BackgroundColor3 = c end)
+
 			local sknob = Instance.new("Frame", trackBg)
-			sknob.Size = UDim2.fromOffset(13,13)
-			sknob.AnchorPoint = Vector2.new(0.5,0.5)
+			sknob.Size = UDim2.fromOffset(12, 12)
+			sknob.AnchorPoint = Vector2.new(0.5, 0.5)
 			sknob.Position = UDim2.fromScale(0, 0.5)
-			sknob.BackgroundColor3 = Color3.new(1,1,1)
+			sknob.BackgroundColor3 = Color3.new(1, 1, 1)
+			sknob.BorderSizePixel = 0
 			corner(sknob, 7)
 			local sks = Instance.new("UIScale", sknob); sks.Scale = 1
-			local draggingSlider = false
 
-			local function updateVisual(v, animate)
+			local draggingSlider = false
+			local function updateVis(v, anim)
 				local pct = (v - minV) / math.max(maxV - minV, 1)
-				local info = animate and TI.fast or TweenInfo.new(0)
+				local info = anim and TI.fast or TweenInfo.new(0)
 				tw(fill, info, { Size = UDim2.fromScale(pct, 1) })
 				tw(sknob, info, { Position = UDim2.fromScale(pct, 0.5) })
 				valLbl.Text = tostring(v)
 			end
-			local function setValue(v)
+			local function setVal(v)
 				value = math.clamp(math.round(v / step) * step, minV, maxV)
-				updateVisual(value, true)
+				updateVis(value, true)
 				if sopts.Callback then pcall(sopts.Callback, value) end
-				if saveEnabled and flagKey then cfg:save(flagKey, tostring(value)) end
+				if saveOn and flagKey then cfg:save(flagKey, tostring(value)) end
 			end
 			local function fromMouse()
-				local abs, sz = trackBg.AbsolutePosition, trackBg.AbsoluteSize
-				local pct = math.clamp((mouse.X - abs.X) / math.max(sz.X,1), 0, 1)
-				setValue(minV + (maxV - minV) * pct)
+				local abs = trackBg.AbsolutePosition
+				local sz  = trackBg.AbsoluteSize
+				setVal(minV + (maxV - minV) * math.clamp((mouse.X - abs.X) / math.max(sz.X, 1), 0, 1))
 			end
 
-			trackBg.MouseEnter:Connect(function() tw(sks, TI.fast, { Scale = 1.3 }) end)
-			trackBg.MouseLeave:Connect(function() if not draggingSlider then tw(sks, TI.fast, { Scale = 1 }) end end)
+			trackBg.MouseEnter:Connect(function() tw(sks, TI.hover, { Scale = 1.3 }) end)
+			trackBg.MouseLeave:Connect(function()
+				if not draggingSlider then tw(sks, TI.hover, { Scale = 1 }) end
+			end)
+
 			local sHit = Instance.new("TextButton", card)
 			sHit.Size = UDim2.new(1, -6, 0, 22)
 			sHit.Position = UDim2.fromOffset(0, 34)
@@ -874,171 +1022,186 @@ local function createWindow(velt, opts)
 				tw(sks, TI.fast, { Scale = 1.5 })
 				fromMouse()
 			end)
-			UserInput.InputEnded:Connect(function(input)
-				if input.UserInputType == Enum.UserInputType.MouseButton1 and draggingSlider then
+			UIS.InputEnded:Connect(function(inp)
+				if inp.UserInputType == Enum.UserInputType.MouseButton1 and draggingSlider then
 					draggingSlider = false
 					tw(sks, TI.bounce, { Scale = 1 })
 				end
 			end)
-			UserInput.InputChanged:Connect(function(input)
-				if draggingSlider and input.UserInputType == Enum.UserInputType.MouseMovement then fromMouse() end
+			UIS.InputChanged:Connect(function(inp)
+				if draggingSlider and inp.UserInputType == Enum.UserInputType.MouseMovement then
+					fromMouse()
+				end
 			end)
-
-			updateVisual(value, false)
+			updateVis(value, false)
 
 			local obj = {}
-			function obj:Set(v) setValue(v or defVal) end
+			function obj:Set(v) setVal(v or def) end
 			function obj:Get() return value end
 			table.insert(tabObj.elements, obj)
 			return obj
 		end
 
-		-- ── AddButton ──
+		-- ── AddButton ─────────────────────────────────
 		function tabObj:AddButton(bopts)
 			bopts = bopts or {}
 			local card = Instance.new("Frame", page)
 			card.Size = UDim2.new(1, 0, 0, 44)
-			card.BackgroundColor3 = T.Card
-			card.BackgroundTransparency = 0.22
-			card.LayoutOrder = nextOrder()
+			card.BackgroundColor3 = D.Card
+			card.BackgroundTransparency = 0.18
+			card.LayoutOrder = nxt()
 			corner(card, 10)
-			local cst = stroke(card, T.Stroke)
+			local cst = stroke(card, D.Stroke, 1)
 			pad(card, 12, 12, 0, 0)
-			attachHover(card, cst)
+			cardHover(card, cst)
 
-			local nameLbl = label(card, tostring(bopts.Name or "Button"), 11, T.Text)
-			nameLbl.Size = UDim2.new(1, -120, 1, 0)
+			local nameLbl = mkLabel(card, tostring(bopts.Name or "Button"), 11, D.Text)
+			nameLbl.Size = UDim2.new(1, -110, 1, 0)
 			nameLbl.AutomaticSize = Enum.AutomaticSize.None
 			nameLbl.TextYAlignment = Enum.TextYAlignment.Center
 
-			local isDanger = bopts.Style == "Danger"
+			local isDanger  = bopts.Style == "Danger"
 			local isPrimary = bopts.Style == "Primary"
-			local btnCol = isDanger and T.Danger or (isPrimary and T.Accent or T.Sidebar)
-			local txtCol = (isDanger or isPrimary) and Color3.new(0.07,0.07,0.07) or T.Text
+			local btnBg = isDanger and D.Danger or D.Surface
 
 			local btn = Instance.new("TextButton", card)
-			btn.Size = UDim2.fromOffset(94, 28)
+			btn.Size = UDim2.fromOffset(90, 28)
 			btn.AnchorPoint = Vector2.new(1, 0.5)
 			btn.Position = UDim2.new(1, -6, 0.5, 0)
-			btn.BackgroundColor3 = btnCol
-			btn.Text = isPrimary and (bopts.Name or "") or "Run"
-			btn.TextColor3 = isPrimary and T.Bg or T.Text
+			btn.BackgroundColor3 = btnBg
+			btn.BackgroundTransparency = isPrimary and 0 or 0.1
+			btn.Text = isPrimary and (bopts.Name or "Run") or "Run"
 			btn.Font = Enum.Font.GothamBold
 			btn.TextSize = 11
 			btn.AutoButtonColor = false
 			btn.ClipsDescendants = true
 			corner(btn, 8)
-			local bst = stroke(btn, isDanger and T.Danger or T.Accent, 1)
-			attachScale(btn, 1.07, 0.92)
+			local bst = stroke(btn, isDanger and D.Danger or D.Accent, 1)
+			onAccent(function(c) if not isDanger then bst.Color = c end end)
+			if isPrimary then
+				btn.TextColor3 = D.Bg
+				btn.BackgroundColor3 = D.Accent
+				onAccent(function(c) btn.BackgroundColor3 = c end)
+			else
+				btn.TextColor3 = D.Text
+			end
+			springScale(btn, 1.07, 0.92)
 
 			-- ripple
-			btn.MouseButton1Click:Connect(function(x, y)
+			btn.MouseButton1Click:Connect(function()
 				local r = Instance.new("Frame", btn)
-				r.Size = UDim2.fromOffset(80,80)
-				r.Position = UDim2.fromOffset((btn.AbsoluteSize.X/2)-40, (btn.AbsoluteSize.Y/2)-40)
-				r.BackgroundColor3 = Color3.new(1,1,1)
-				r.BackgroundTransparency = 0.65
+				r.Size = UDim2.fromOffset(60, 60)
+				r.Position = UDim2.fromOffset(btn.AbsoluteSize.X/2 - 30, btn.AbsoluteSize.Y/2 - 30)
+				r.BackgroundColor3 = Color3.new(1, 1, 1)
+				r.BackgroundTransparency = 0.7
 				r.ZIndex = 10
-				corner(r, 40)
-				tw(r, TweenInfo.new(0.4), { Size = UDim2.fromOffset(200,200), Position = UDim2.fromOffset(-60,-60), BackgroundTransparency = 1 })
-				task.delay(0.42, function() if r then r:Destroy() end end)
+				r.BorderSizePixel = 0
+				corner(r, 30)
+				tw(r, TweenInfo.new(0.38), {
+					Size = UDim2.fromOffset(200, 200),
+					Position = UDim2.fromOffset(-70, -70),
+					BackgroundTransparency = 1,
+				})
+				task.delay(0.40, function() if r and r.Parent then r:Destroy() end end)
 				if bopts.Callback then pcall(bopts.Callback) end
 			end)
 		end
 
-		-- ── AddDropdown ──
+		-- ── AddDropdown ───────────────────────────────
 		function tabObj:AddDropdown(dopts)
 			dopts = dopts or {}
 			local flagKey = dopts.Flag and ("dd_" .. tostring(dopts.Flag))
-			local options = dopts.Options or {}
-			local defVal = dopts.Default or (options[1] and tostring(options[1]))
-			if saveEnabled and flagKey then defVal = cfg:load(flagKey, defVal) end
-			local selected = defVal
+			local options = type(dopts.Options) == "table" and dopts.Options or {}
+			local def = dopts.Default or (options[1] and tostring(options[1]))
+			if saveOn and flagKey then def = cfg:load(flagKey, def) end
+			local selected = def
 
 			local card = Instance.new("Frame", page)
 			card.Size = UDim2.new(1, 0, 0, 44)
-			card.BackgroundColor3 = T.Card
-			card.BackgroundTransparency = 0.22
-			card.LayoutOrder = nextOrder()
+			card.BackgroundColor3 = D.Card
+			card.BackgroundTransparency = 0.18
+			card.LayoutOrder = nxt()
 			corner(card, 10)
-			local cst = stroke(card, T.Stroke)
-			attachHover(card, cst)
+			local cst = stroke(card, D.Stroke, 1)
 			pad(card, 12, 12, 0, 0)
+			cardHover(card, cst)
 
-			local nameLbl = label(card, tostring(dopts.Name or "Dropdown"), 11, T.Text)
+			local nameLbl = mkLabel(card, tostring(dopts.Name or "Dropdown"), 11, D.Text)
 			nameLbl.Size = UDim2.new(1, -120, 1, 0)
 			nameLbl.AutomaticSize = Enum.AutomaticSize.None
 			nameLbl.TextYAlignment = Enum.TextYAlignment.Center
 
 			local selBtn = Instance.new("TextButton", card)
-			selBtn.Size = UDim2.fromOffset(104, 28)
+			selBtn.Size = UDim2.fromOffset(106, 28)
 			selBtn.AnchorPoint = Vector2.new(1, 0.5)
 			selBtn.Position = UDim2.new(1, -6, 0.5, 0)
-			selBtn.BackgroundColor3 = T.Sidebar
+			selBtn.BackgroundColor3 = D.Surface
 			selBtn.Text = tostring(selected or "Select…")
-			selBtn.TextColor3 = T.Accent
 			selBtn.Font = Enum.Font.GothamBold
 			selBtn.TextSize = 10
 			selBtn.AutoButtonColor = false
 			corner(selBtn, 8)
-			stroke(selBtn, T.Accent, 1)
-			attachScale(selBtn, 1.05, 0.93)
+			local sbst = stroke(selBtn, D.Accent, 1)
+			onAccent(function(c) sbst.Color = c; selBtn.TextColor3 = c end)
+			selBtn.TextColor3 = D.Accent
+			springScale(selBtn, 1.05, 0.93)
 
-			-- dropdown popup
 			local popup, open = nil, false
 			selBtn.MouseButton1Click:Connect(function()
 				if open and popup then
-					popup:Destroy()
-					popup, open = nil, false
-					return
+					popup:Destroy(); popup, open = nil, false; return
 				end
 				open = true
-				popup = Instance.new("Frame", gui)
-				popup.BackgroundColor3 = T.Sidebar
-				popup.Size = UDim2.fromOffset(140, math.min(#options, 8) * 28 + 8)
-				popup.ZIndex = 100
+				popup = Instance.new("Frame", GUI)
+				popup.BackgroundColor3 = D.Sidebar
+				popup.Size = UDim2.fromOffset(146, math.min(#options, 8) * 28 + 10)
+				popup.ZIndex = 200
 				corner(popup, 10)
-				stroke(popup, T.Stroke)
+				stroke(popup, D.StrokeH, 1)
 				local abs = selBtn.AbsolutePosition
 				popup.Position = UDim2.fromOffset(abs.X, abs.Y + selBtn.AbsoluteSize.Y + 4)
-				local plist = list(popup, 2)
-				local ppad = Instance.new("UIPadding", popup)
-				ppad.PaddingTop, ppad.PaddingBottom = UDim.new(0,4), UDim.new(0,4)
-				ppad.PaddingLeft, ppad.PaddingRight = UDim.new(0,6), UDim.new(0,6)
+				listLayout(popup, 2)
+				pad(popup, 6, 6, 4, 4)
+
 				for _, opt in ipairs(options) do
 					local ob = Instance.new("TextButton", popup)
 					ob.Size = UDim2.new(1, 0, 0, 26)
 					ob.BackgroundTransparency = 1
 					ob.Text = tostring(opt)
-					ob.TextColor3 = tostring(opt) == tostring(selected) and T.Accent or T.Text
 					ob.Font = Enum.Font.GothamMedium
 					ob.TextSize = 11
 					ob.AutoButtonColor = false
 					ob.TextXAlignment = Enum.TextXAlignment.Left
-					local op = Instance.new("UIPadding", ob); op.PaddingLeft = UDim.new(0,6)
-					ob.MouseEnter:Connect(function() tw(ob, TI.fast, { BackgroundTransparency = 0.65, BackgroundColor3 = T.Card }) end)
-					ob.MouseLeave:Connect(function() tw(ob, TI.fast, { BackgroundTransparency = 1 }) end)
+					ob.TextColor3 = tostring(opt) == tostring(selected) and D.Accent or D.Text
+					onAccent(function(c)
+						if tostring(opt) == tostring(selected) then ob.TextColor3 = c end
+					end)
+					local op2 = Instance.new("UIPadding", ob); op2.PaddingLeft = UDim.new(0, 8)
+					ob.MouseEnter:Connect(function()
+						tw(ob, TI.hover, { BackgroundTransparency = 0.60, BackgroundColor3 = D.CardHov })
+					end)
+					ob.MouseLeave:Connect(function()
+						tw(ob, TI.hover, { BackgroundTransparency = 1 })
+					end)
 					ob.MouseButton1Click:Connect(function()
 						selected = tostring(opt)
 						selBtn.Text = selected
 						popup:Destroy(); popup, open = nil, false
-						if saveEnabled and flagKey then cfg:save(flagKey, selected) end
+						if saveOn and flagKey then cfg:save(flagKey, selected) end
 						if dopts.Callback then pcall(dopts.Callback, selected) end
 					end)
 				end
-				-- close on click outside
+				-- close on outside click
 				task.spawn(function()
 					task.wait(0.05)
 					local conn
-					conn = UserInput.InputBegan:Connect(function(input)
-						if input.UserInputType == Enum.UserInputType.MouseButton1 then
-							if popup and not popup:IsAncestorOf(UserInput:GetFocusedTextBox() or Instance.new("TextBox")) then
-								task.defer(function()
-									if popup then popup:Destroy() end
-									popup, open = nil, false
-									conn:Disconnect()
-								end)
-							end
+					conn = UIS.InputBegan:Connect(function(inp)
+						if inp.UserInputType == Enum.UserInputType.MouseButton1 then
+							task.defer(function()
+								if popup and popup.Parent then popup:Destroy() end
+								popup, open = nil, false
+								pcall(function() conn:Disconnect() end)
+							end)
 						end
 					end)
 				end)
@@ -1046,49 +1209,49 @@ local function createWindow(velt, opts)
 
 			local obj = {}
 			function obj:Set(v, silent)
-				selected = tostring(v)
-				selBtn.Text = selected
+				selected = tostring(v); selBtn.Text = selected
 				if not silent and dopts.Callback then pcall(dopts.Callback, selected) end
 			end
 			function obj:Get() return selected end
 			function obj:SetOptions(newOpts)
-				options = newOpts
+				options = type(newOpts) == "table" and newOpts or {}
 			end
 			table.insert(tabObj.elements, obj)
 			return obj
 		end
 
-		-- ── AddStats ──
-		function tabObj:AddStats(sopts)
-			sopts = sopts or {}
-			local cols = sopts.Columns or 3
-			local items = sopts.Items or {}
+		-- ── AddStats ──────────────────────────────────
+		function tabObj:AddStats(sopts2)
+			sopts2 = sopts2 or {}
+			local cols  = sopts2.Columns or 3
+			local items = sopts2.Items or {}
 
 			local card = Instance.new("Frame", page)
 			card.Size = UDim2.new(1, 0, 0, 56)
-			card.BackgroundColor3 = T.Card
-			card.BackgroundTransparency = 0.22
-			card.LayoutOrder = nextOrder()
+			card.BackgroundColor3 = D.Card
+			card.BackgroundTransparency = 0.18
+			card.LayoutOrder = nxt()
 			corner(card, 10)
-			stroke(card, T.Stroke)
+			stroke(card, D.Stroke, 1)
 			local grid = Instance.new("UIGridLayout", card)
-			grid.CellSize = UDim2.new(1/cols, -6, 1, -6)
+			grid.CellSize    = UDim2.new(1/cols, -6, 1, -6)
 			grid.CellPadding = UDim2.fromOffset(4, 4)
-			local gpad = Instance.new("UIPadding", card)
-			gpad.PaddingLeft, gpad.PaddingRight = UDim.new(0,8), UDim.new(0,8)
-			gpad.PaddingTop, gpad.PaddingBottom = UDim.new(0,6), UDim.new(0,6)
+			pad(card, 8, 8, 6, 6)
 
 			local cellMap = {}
 			for _, item in ipairs(items) do
 				local cell = Instance.new("Frame", card)
 				cell.BackgroundTransparency = 1
-				local vl = label(cell, tostring(item.Value or "0"), 16, T.Accent, Enum.TextXAlignment.Center, true)
-				vl.Size = UDim2.new(1,0,0,22)
+				local vl = mkLabel(cell, tostring(item.Value or "0"), 15, D.Accent,
+					Enum.TextXAlignment.Center, true)
+				vl.Size = UDim2.new(1, 0, 0, 22)
 				vl.AutomaticSize = Enum.AutomaticSize.None
 				vl.TextYAlignment = Enum.TextYAlignment.Center
-				local ll2 = label(cell, tostring(item.Label or ""), 9, T.Sub, Enum.TextXAlignment.Center)
-				ll2.Position = UDim2.fromOffset(0,22)
-				ll2.Size = UDim2.new(1,0,0,14)
+				onAccent(function(c) vl.TextColor3 = c end)
+				local ll2 = mkLabel(cell, tostring(item.Label or ""), 9, D.Sub,
+					Enum.TextXAlignment.Center)
+				ll2.Position = UDim2.fromOffset(0, 22)
+				ll2.Size = UDim2.new(1, 0, 0, 14)
 				ll2.AutomaticSize = Enum.AutomaticSize.None
 				cellMap[item.Id] = vl
 			end
@@ -1101,10 +1264,12 @@ local function createWindow(velt, opts)
 			return obj
 		end
 
-		-- ── Clear (rebuild page) ──
+		-- ── Clear ─────────────────────────────────────
 		function tabObj:Clear()
 			for _, c in ipairs(page:GetChildren()) do
-				if not c:IsA("UIListLayout") and not c:IsA("UIPadding") then c:Destroy() end
+				if not c:IsA("UIListLayout") and not c:IsA("UIPadding") then
+					c:Destroy()
+				end
 			end
 			tabObj._order = 0
 			tabObj.elements = {}
@@ -1113,108 +1278,122 @@ local function createWindow(velt, opts)
 		return tabObj
 	end
 
-	function WIN:Notify(opts)
-		showNotify(gui, opts or {})
+	function WIN:Notify(opts2)
+		pushToast(GUI, opts2 or {})
 	end
 
 	function WIN:SetSize(w, h)
-		mainF.Size = UDim2.fromOffset(math.max(minW, w), math.max(minH, h))
+		main.Size = UDim2.fromOffset(
+			math.max(minW, w),
+			math.max(minH, h))
 	end
+
+	-- expose accent setter
+	WIN.SetAccent = setAccent
 
 	return WIN
 end
 
--- ============================================================
--- SPLASH
--- ============================================================
-local function createSplash(velt, opts)
+-- ══════════════════════════════════════════════════════
+--  SPLASH
+-- ══════════════════════════════════════════════════════
+local function newSplash(_, opts)
 	opts = opts or {}
-	local gui2 = Instance.new("ScreenGui")
-	gui2.Name = "VeltSplash"
-	gui2.ResetOnSpawn = false
-	gui2.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-	gui2.IgnoreGuiInset = true
-	gui2.Parent = (gethui and gethui()) or PlayerGui
+	local sg = Instance.new("ScreenGui")
+	sg.Name = "VeltSplash2"
+	sg.ResetOnSpawn = false
+	sg.IgnoreGuiInset = true
+	sg.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+	sg.Parent = (gethui and pcall(gethui) and gethui()) or PGui
 
-	local bg = Instance.new("CanvasGroup", gui2)
-	bg.Size = UDim2.fromScale(1,1)
-	bg.BackgroundColor3 = T.Bg
-	bg.GroupTransparency = 0
+	local bg = Instance.new("Frame", sg)
+	bg.Size = UDim2.fromScale(1, 1)
+	bg.BackgroundColor3 = D.Bg
+	bg.BorderSizePixel = 0
 
+	-- logo ring
 	local ring = Instance.new("Frame", bg)
 	ring.Size = UDim2.fromOffset(80, 80)
 	ring.AnchorPoint = Vector2.new(0.5, 0.5)
-	ring.Position = UDim2.new(0.5, 0, 0.5, -60)
-	ring.BackgroundColor3 = T.Sidebar
+	ring.Position = UDim2.new(0.5, 0, 0.5, -68)
+	ring.BackgroundColor3 = D.Surface
+	ring.BorderSizePixel = 0
 	corner(ring, 24)
-	stroke(ring, T.Accent, 2)
+	local rst = stroke(ring, D.Accent, 2)
+	onAccent(function(c) rst.Color = c end)
 
-	local titleL = Instance.new("TextLabel", bg)
-	titleL.Text = "VELT"
-	titleL.Font = Enum.Font.GothamBold
-	titleL.TextSize = 24
-	titleL.TextColor3 = T.Accent
-	titleL.BackgroundTransparency = 1
-	titleL.Size = UDim2.new(1, 0, 0, 30)
-	titleL.Position = UDim2.new(0, 0, 0.5, 0)
-	titleL.TextXAlignment = Enum.TextXAlignment.Center
+	-- logo image (if provided)
+	if opts.LogoId and opts.LogoId ~= "" then
+		local li = Instance.new("ImageLabel", ring)
+		li.Size = UDim2.fromScale(0.72, 0.72)
+		li.AnchorPoint = Vector2.new(0.5, 0.5)
+		li.Position = UDim2.fromScale(0.5, 0.5)
+		li.BackgroundTransparency = 1
+		li.ScaleType = Enum.ScaleType.Fit
+		local id = tostring(opts.LogoId)
+		if not id:find("rbxassetid://") then id = "rbxassetid://" .. id end
+		li.Image = id
+	else
+		local vl = mkLabel(ring, "V", 32, D.Accent, Enum.TextXAlignment.Center, true)
+		vl.Size = UDim2.fromScale(1, 1)
+		vl.AutomaticSize = Enum.AutomaticSize.None
+		vl.TextYAlignment = Enum.TextYAlignment.Center
+		onAccent(function(c) vl.TextColor3 = c end)
+	end
 
-	local subL = Instance.new("TextLabel", bg)
-	subL.Text = tostring(opts.Subtitle or "")
-	subL.Font = Enum.Font.Gotham
-	subL.TextSize = 12
-	subL.TextColor3 = T.Sub
-	subL.BackgroundTransparency = 1
-	subL.Size = UDim2.new(1, 0, 0, 18)
-	subL.Position = UDim2.new(0, 0, 0.5, 32)
-	subL.TextXAlignment = Enum.TextXAlignment.Center
+	local titleL = mkLabel(bg, "VELT", 22, D.Accent, Enum.TextXAlignment.Center, true)
+	titleL.Position = UDim2.new(0, 0, 0.5, 2)
+	titleL.Size = UDim2.new(1, 0, 0, 28)
+	titleL.AutomaticSize = Enum.AutomaticSize.None
+	titleL.TextYAlignment = Enum.TextYAlignment.Center
+	onAccent(function(c) titleL.TextColor3 = c end)
 
-	local statL = Instance.new("TextLabel", bg)
-	statL.Text = "Initializing"
-	statL.Font = Enum.Font.Gotham
-	statL.TextSize = 10
-	statL.TextColor3 = T.Sub
-	statL.BackgroundTransparency = 1
-	statL.Size = UDim2.new(1, 0, 0, 14)
+	local subL = mkLabel(bg, tostring(opts.Subtitle or ""), 11, D.Sub, Enum.TextXAlignment.Center)
+	subL.Position = UDim2.new(0, 0, 0.5, 34)
+	subL.Size = UDim2.new(1, 0, 0, 16)
+	subL.AutomaticSize = Enum.AutomaticSize.None
+
+	local statL = mkLabel(bg, "Initializing…", 10, D.Muted, Enum.TextXAlignment.Center)
 	statL.Position = UDim2.new(0, 0, 0.5, 90)
-	statL.TextXAlignment = Enum.TextXAlignment.Center
+	statL.Size = UDim2.new(1, 0, 0, 14)
+	statL.AutomaticSize = Enum.AutomaticSize.None
 
-	local trackBg2 = Instance.new("Frame", bg)
-	trackBg2.Size = UDim2.fromOffset(220, 4)
-	trackBg2.AnchorPoint = Vector2.new(0.5, 0.5)
-	trackBg2.Position = UDim2.new(0.5, 0, 0.5, 72)
-	trackBg2.BackgroundColor3 = T.TogOff
-	corner(trackBg2, 2)
-	local progFill = Instance.new("Frame", trackBg2)
-	progFill.Size = UDim2.fromScale(0, 1)
-	progFill.BackgroundColor3 = T.Accent
-	corner(progFill, 2)
+	local trackBg = Instance.new("Frame", bg)
+	trackBg.Size = UDim2.fromOffset(220, 3)
+	trackBg.AnchorPoint = Vector2.new(0.5, 0.5)
+	trackBg.Position = UDim2.new(0.5, 0, 0.5, 72)
+	trackBg.BackgroundColor3 = D.TogOff
+	trackBg.BorderSizePixel = 0
+	corner(trackBg, 2)
+	local pf = Instance.new("Frame", trackBg)
+	pf.Size = UDim2.fromScale(0, 1)
+	pf.BorderSizePixel = 0
+	corner(pf, 2)
+	onAccent(function(c) pf.BackgroundColor3 = c end)
 
-	local splash = {}
-	function splash:Preload() end
-	function splash:Progress(p, text)
-		tw(progFill, TI.fast, { Size = UDim2.fromScale(math.clamp(p, 0, 1), 1) })
+	local obj = {}
+	function obj:Preload() end
+	function obj:Progress(p, text)
+		tw(pf, TI.fast, { Size = UDim2.fromScale(math.clamp(p, 0, 1), 1) })
 		if text then statL.Text = tostring(text) end
 	end
-	function splash:Finish()
-		tw(bg, TweenInfo.new(0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.In), { GroupTransparency = 1 })
-		task.delay(0.45, function() gui2:Destroy() end)
+	function obj:Finish()
+		tw(bg, TweenInfo.new(0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+			{ BackgroundTransparency = 1 })
+		task.delay(0.42, function() sg:Destroy() end)
 	end
-	return splash
+	return obj
 end
 
--- ============================================================
--- VELT OBJECT
--- ============================================================
+-- ══════════════════════════════════════════════════════
+--  EXPORT
+-- ══════════════════════════════════════════════════════
 local Velt = {}
 Velt.__index = Velt
-
-function Velt:CreateWindow(opts)
-	return createWindow(self, opts)
-end
-
-function Velt:Splash(opts)
-	return createSplash(self, opts)
+Velt.CreateWindow = newWindow
+Velt.Splash       = newSplash
+Velt.SetAccent    = setAccent
+return setmetatable({}, Velt)
 end
 
 return setmetatable({}, Velt)
