@@ -33,7 +33,7 @@
 ]]
 
 --[[
-	VELT UI LIBRARY  v3.0  —  drop-in executor library
+	VELT UI LIBRARY  v3.0  
 	━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 	Usage:
 	  local Velt = loadstring(game:HttpGet(RAW_URL))()
@@ -71,6 +71,56 @@ local UIS      = game:GetService("UserInputService")
 local Run      = game:GetService("RunService")
 local LP       = Players.LocalPlayer
 local PGui     = LP:WaitForChild("PlayerGui")
+
+-- ════════════════════════════════════════════
+--  AUTO-DETECT  game name + script name
+-- ════════════════════════════════════════════
+local function detectGameName()
+	-- 1) game.Name (set by developer in Studio)
+	local n = tostring(game.Name or "")
+	if n ~= "" and n ~= "Game" and n ~= "Baseplate" and n ~= "game" then
+		return n
+	end
+	-- 2) MarketplaceService PlaceName (works in live game)
+	local ok, info = pcall(function()
+		return game:GetService("MarketplaceService"):GetProductInfo(game.PlaceId)
+	end)
+	if ok and info and type(info.Name) == "string" and info.Name ~= "" then
+		return info.Name
+	end
+	-- 3) fallback: PlaceId
+	return "Place " .. tostring(game.PlaceId)
+end
+
+-- Script name: detected from the calling script's Name at load time.
+-- Since this library is loaded with loadstring, we try to find the
+-- LocalScript that called us by walking the script chain.
+local function detectScriptName()
+	-- getscriptname is an executor function (Synapse, Fluxus, etc.)
+	if getscriptname then
+		local ok, n = pcall(getscriptname)
+		if ok and type(n) == "string" and n ~= "" then
+			-- strip path separators, keep just the filename
+			return (n:match("[^\/]+$") or n):gsub("%.lua$", "")
+		end
+	end
+	-- fallback: try script chain
+	local s = script
+	if s and s.Name and s.Name ~= "" and s.Name ~= "Script" then
+		return s.Name
+	end
+	return nil  -- caller did not name their script; use game name only
+end
+
+local _autoGameName   = detectGameName()
+local _autoScriptName = detectScriptName()
+-- Combined subtitle: "ScriptName • GameName"  or just "GameName"
+local function autoSubtitle()
+	if _autoScriptName then
+		return _autoScriptName .. "  •  " .. _autoGameName
+	end
+	return _autoGameName
+end
 
 -- ════════════════════════════════════════════
 --  DESIGN TOKENS  (OLED dark + gold accent)
@@ -314,10 +364,35 @@ local function createWindow(_, opts)
 	GUI.ResetOnSpawn     = false
 	GUI.ZIndexBehavior   = Enum.ZIndexBehavior.Sibling
 	GUI.IgnoreGuiInset   = true
-	GUI.Parent = (function()
-		local ok, h = pcall(function() return gethui() end)
-		return (ok and h) or PGui
-	end)()
+	-- ── built-in asset URLs (logo + icons from your GitHub) ──
+	-- These are fetched and inserted into Roblox via Image property (Content URL).
+	-- Roblox accepts raw GitHub PNG URLs directly in ImageLabel.Image.
+	local VELT_LOGO_URL  = "https://raw.githubusercontent.com/erszxu-hmm/velt-assets/main/velt_logo.png"
+	local VELT_ICONS_URL = "https://raw.githubusercontent.com/erszxu-hmm/velt-assets/main/velt_icons.png"
+	-- If the caller passed a LogoId number, that overrides the built-in logo.
+	local _logoContent = (opts.LogoId and opts.LogoId ~= "")
+		and ("rbxassetid://" .. tostring(opts.LogoId):gsub("rbxassetid://",""))
+		or VELT_LOGO_URL
+
+	-- ── safe parent resolution: gethui > CoreGui > PlayerGui
+	do
+		local function tryParent(target)
+			local ok = pcall(function()
+				local probe = Instance.new("ScreenGui")
+				probe.Parent = target
+				probe:Destroy()
+			end)
+			return ok
+		end
+		local parent = PGui
+		if type(gethui) == "function" then
+			local ok, h = pcall(gethui)
+			if ok and h then parent = h end
+		elseif tryParent(game:GetService("CoreGui")) then
+			parent = game:GetService("CoreGui")
+		end
+		GUI.Parent = parent
+	end
 
 	local vp = workspace.CurrentCamera.ViewportSize
 	local W  = (opts.Size and opts.Size.X.Offset) or 640
@@ -502,6 +577,13 @@ local function createWindow(_, opts)
 		end
 	end)
 
+	-- auto-fill Subtitle from game/script detection if caller did not set it
+	if not opts.Subtitle or opts.Subtitle == "" then
+		opts.Subtitle = autoSubtitle()
+		opts._customSubtitle = false
+	else
+		opts._customSubtitle = true
+	end
 	local iTitle = tostring(opts.Title or "Velt")
 	local iLbl = Instance.new("TextLabel", island)
 	iLbl.Text                = iTitle .. "   •   tap to open"
@@ -549,9 +631,9 @@ local function createWindow(_, opts)
 	tbLine.BackgroundColor3 = D.Stroke
 	tbLine.BorderSizePixel = 0
 
-	-- logo image
-	local logoW = 0
-	if opts.LogoId and opts.LogoId ~= "" then
+	-- logo image (always shown — built-in URL or caller override)
+	local logoW = 36
+	do
 		local li = Instance.new("ImageLabel", topbar)
 		li.Name                   = "Logo"
 		li.Size                   = UDim2.fromOffset(28, 28)
@@ -559,10 +641,7 @@ local function createWindow(_, opts)
 		li.BackgroundTransparency = 1
 		li.ScaleType              = Enum.ScaleType.Fit
 		li.ZIndex                 = 5
-		local id = tostring(opts.LogoId)
-		if not id:find("rbxassetid://") then id = "rbxassetid://" .. id end
-		li.Image = id
-		logoW = 36
+		li.Image                  = _logoContent
 	end
 
 	local brandX = 16 + logoW
@@ -579,7 +658,7 @@ local function createWindow(_, opts)
 
 	-- subtitle (game/script name — changes per window)
 	local subLbl = Instance.new("TextLabel", topbar)
-	subLbl.Text              = tostring(opts.Subtitle or "")
+	subLbl.Text              = tostring(opts.Subtitle or autoSubtitle())
 	subLbl.Font              = Enum.Font.Gotham
 	subLbl.TextSize          = 10
 	subLbl.TextColor3        = D.Sub
@@ -588,6 +667,22 @@ local function createWindow(_, opts)
 	subLbl.Size              = UDim2.fromOffset(220, 14)
 	subLbl.TextXAlignment    = Enum.TextXAlignment.Left
 	subLbl.ZIndex            = 5
+
+	-- async update subtitle once MarketplaceService resolves (if it was slow)
+	task.spawn(function()
+		local ok, info = pcall(function()
+			return game:GetService("MarketplaceService"):GetProductInfo(game.PlaceId)
+		end)
+		if ok and info and type(info.Name) == "string" and info.Name ~= "" then
+			_autoGameName = info.Name
+			-- only overwrite if the user did not pass a custom Subtitle
+			if not opts._customSubtitle then
+				local newSub = _autoScriptName and (_autoScriptName .. "  •  " .. info.Name) or info.Name
+				if subLbl and subLbl.Parent then subLbl.Text = newSub end
+				if iLbl and iLbl.Parent then iLbl.Text = iTitle .. "   •   tap to open" end
+			end
+		end
+	end)
 
 	-- minimize btn
 	local minBtn = Instance.new("TextButton", topbar)
@@ -1299,10 +1394,20 @@ local function createSplash(_, opts)
 	sg.ResetOnSpawn = false
 	sg.IgnoreGuiInset = true
 	sg.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-	sg.Parent = (function()
-		local ok, h = pcall(function() return gethui() end)
-		return (ok and h) or PGui
-	end)()
+	do
+		local parent2 = PGui
+		if type(gethui) == "function" then
+			local ok2, h2 = pcall(gethui)
+			if ok2 and h2 then parent2 = h2 end
+		elseif pcall(function()
+				local p = Instance.new("ScreenGui")
+				p.Parent = game:GetService("CoreGui")
+				p:Destroy()
+			end) then
+			parent2 = game:GetService("CoreGui")
+		end
+		sg.Parent = parent2
+	end
 
 	local bg = Instance.new("Frame", sg)
 	bg.Size = UDim2.fromScale(1, 1)
@@ -1320,22 +1425,18 @@ local function createSplash(_, opts)
 	local rst = stroke(ring, D.Accent, 2)
 	onAccent(function(c) rst.Color = c end)
 
-	if opts.LogoId and opts.LogoId ~= "" then
+	-- splash logo — always use built-in logo URL (or caller override)
+	local _splashLogo = (opts.LogoId and opts.LogoId ~= "")
+		and ("rbxassetid://" .. tostring(opts.LogoId):gsub("rbxassetid://",""))
+		or "https://raw.githubusercontent.com/erszxu-hmm/velt-assets/main/velt_logo.png"
+	do
 		local li = Instance.new("ImageLabel", ring)
 		li.Size = UDim2.fromScale(0.72, 0.72)
 		li.AnchorPoint = Vector2.new(0.5, 0.5)
 		li.Position = UDim2.fromScale(0.5, 0.5)
 		li.BackgroundTransparency = 1
 		li.ScaleType = Enum.ScaleType.Fit
-		local id = tostring(opts.LogoId)
-		if not id:find("rbxassetid://") then id = "rbxassetid://" .. id end
-		li.Image = id
-	else
-		local vl = newLabel(ring, "V", 32, D.Accent, Enum.TextXAlignment.Center, true)
-		vl.Size = UDim2.fromScale(1, 1)
-		vl.AutomaticSize = Enum.AutomaticSize.None
-		vl.TextYAlignment = Enum.TextYAlignment.Center
-		onAccent(function(c) vl.TextColor3 = c end)
+		li.Image = _splashLogo
 	end
 
 	local titleL = newLabel(bg, "VELT", 22, D.Accent, Enum.TextXAlignment.Center, true)
@@ -1345,7 +1446,7 @@ local function createSplash(_, opts)
 	titleL.TextYAlignment = Enum.TextYAlignment.Center
 	onAccent(function(c) titleL.TextColor3 = c end)
 
-	local subL = newLabel(bg, tostring(opts.Subtitle or ""), 11, D.Sub, Enum.TextXAlignment.Center)
+	local subL = newLabel(bg, tostring(opts.Subtitle ~= "" and opts.Subtitle or autoSubtitle()), 11, D.Sub, Enum.TextXAlignment.Center)
 	subL.Position = UDim2.new(0, 0, 0.5, 34)
 	subL.Size = UDim2.new(1, 0, 0, 16)
 	subL.AutomaticSize = Enum.AutomaticSize.None
